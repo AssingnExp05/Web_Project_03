@@ -1,31 +1,19 @@
 <?php
 // shelter/adoptionRequests.php - Adoption Requests Page for Shelters
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
-// Start session
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
-}
-
-// Base URL
-$BASE_URL = 'http://' . $_SERVER['HTTP_HOST'] . '/pet_care/';
+require_once '../config/db.php';
 
 // Check if user is logged in and is a shelter
-if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] !== 'shelter') {
-    $_SESSION['error_message'] = 'Please login as a shelter to access this page.';
-    header('Location: ' . $BASE_URL . 'auth/login.php');
+if (!Session::isLoggedIn() || Session::getUserType() !== 'shelter') {
+    header('Location: ../auth/login.php');
     exit();
 }
 
-// Get user information
-$user_id = $_SESSION['user_id'];
+$user_id = Session::getUserId();
 $page_title = 'Adoption Requests - Shelter Dashboard';
 
 // Initialize variables
 $applications = [];
 $shelter_info = null;
-$current_user = null;
 $pets_list = [];
 $stats = [
     'total_requests' => 0,
@@ -37,7 +25,7 @@ $stats = [
 // Filter parameters
 $filter_status = $_GET['status'] ?? '';
 $filter_pet = $_GET['pet'] ?? '';
-$search_query = $_GET['search'] ?? '';
+$search_query = trim($_GET['search'] ?? '');
 $sort_by = $_GET['sort'] ?? 'application_date';
 $sort_order = $_GET['order'] ?? 'DESC';
 $page = max(1, intval($_GET['page'] ?? 1));
@@ -49,18 +37,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
     header('Content-Type: application/json');
     
     try {
-        require_once __DIR__ . '/../config/db.php';
-        $db = getDB();
-        
-        if (!$db) {
-            echo json_encode(['success' => false, 'message' => 'Database connection failed']);
-            exit();
-        }
-        
         // Get shelter info
-        $stmt = $db->prepare("SELECT shelter_id FROM shelters WHERE user_id = ?");
-        $stmt->execute([$user_id]);
-        $shelter_info = $stmt->fetch(PDO::FETCH_ASSOC);
+        $shelter_info = DBHelper::selectOne("SELECT shelter_id FROM shelters WHERE user_id = ?", [$user_id]);
         
         if (!$shelter_info) {
             echo json_encode(['success' => false, 'message' => 'Shelter not found']);
@@ -72,64 +50,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
                 case 'update_status':
                     $application_id = intval($_POST['application_id'] ?? 0);
                     $new_status = $_POST['new_status'] ?? '';
-                    $admin_notes = trim($_POST['admin_notes'] ?? '');
                     
                     if ($application_id > 0 && in_array($new_status, ['pending', 'approved', 'rejected'])) {
                         // Verify application belongs to this shelter
-                        $stmt = $db->prepare("
+                        $app_info = DBHelper::selectOne("
                             SELECT aa.application_id, aa.pet_id, p.pet_name 
                             FROM adoption_applications aa 
                             JOIN pets p ON aa.pet_id = p.pet_id 
                             WHERE aa.application_id = ? AND aa.shelter_id = ?
-                        ");
-                        $stmt->execute([$application_id, $shelter_info['shelter_id']]);
-                        $app_info = $stmt->fetch(PDO::FETCH_ASSOC);
+                        ", [$application_id, $shelter_info['shelter_id']]);
                         
                         if ($app_info) {
+                            $db = getDB();
                             $db->beginTransaction();
                             
                             try {
                                 // Update application status with reviewed_by
-                                $stmt = $db->prepare("
+                                DBHelper::execute("
                                     UPDATE adoption_applications 
                                     SET application_status = ?, reviewed_by = ? 
                                     WHERE application_id = ?
-                                ");
-                                $stmt->execute([$new_status, $user_id, $application_id]);
+                                ", [$new_status, $user_id, $application_id]);
                                 
-                                // If approved, create adoption record and update pet status
+                                // If approved, update pet status to pending
                                 if ($new_status === 'approved') {
-                                    // Update pet status to pending
-                                    $stmt = $db->prepare("UPDATE pets SET status = 'pending' WHERE pet_id = ?");
-                                    $stmt->execute([$app_info['pet_id']]);
+                                    DBHelper::execute("UPDATE pets SET status = 'pending' WHERE pet_id = ?", [$app_info['pet_id']]);
                                     
                                     // Check if adoption record already exists
-                                    $stmt = $db->prepare("SELECT adoption_id FROM adoptions WHERE application_id = ?");
-                                    $stmt->execute([$application_id]);
+                                    $adoption_exists = DBHelper::selectOne("SELECT adoption_id FROM adoptions WHERE application_id = ?", [$application_id]);
                                     
-                                    if (!$stmt->fetch()) {
+                                    if (!$adoption_exists) {
                                         // Create adoption record
-                                        $stmt = $db->prepare("
-                                            INSERT INTO adoptions (application_id, pet_id, adopter_id, shelter_id, adoption_date)
-                                            SELECT ?, pet_id, adopter_id, shelter_id, NOW()
+                                        DBHelper::insert("
+                                            INSERT INTO adoptions (application_id, pet_id, adopter_id, shelter_id, adoption_date, adoption_fee_paid)
+                                            SELECT ?, pet_id, adopter_id, shelter_id, NOW(), 0
                                             FROM adoption_applications 
                                             WHERE application_id = ?
-                                        ");
-                                        $stmt->execute([$application_id, $application_id]);
+                                        ", [$application_id, $application_id]);
                                     }
                                 } elseif ($new_status === 'rejected') {
                                     // Check if there are other approved applications for this pet
-                                    $stmt = $db->prepare("
-                                        SELECT COUNT(*) FROM adoption_applications 
-                                        WHERE pet_id = ? AND application_status = 'approved' AND shelter_id = ?
-                                    ");
-                                    $stmt->execute([$app_info['pet_id'], $shelter_info['shelter_id']]);
-                                    $approved_count = $stmt->fetchColumn();
+                                    $approved_count = DBHelper::count('adoption_applications', [
+                                        'pet_id' => $app_info['pet_id'],
+                                        'application_status' => 'approved',
+                                        'shelter_id' => $shelter_info['shelter_id']
+                                    ]);
                                     
                                     // If no other approved applications, set pet back to available
                                     if ($approved_count == 0) {
-                                        $stmt = $db->prepare("UPDATE pets SET status = 'available' WHERE pet_id = ?");
-                                        $stmt->execute([$app_info['pet_id']]);
+                                        DBHelper::execute("UPDATE pets SET status = 'available' WHERE pet_id = ?", [$app_info['pet_id']]);
                                     }
                                 }
                                 
@@ -152,37 +121,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
                     
                     if ($application_id > 0) {
                         // Verify application belongs to this shelter
-                        $stmt = $db->prepare("
+                        $app_info = DBHelper::selectOne("
                             SELECT aa.application_id, aa.pet_id 
                             FROM adoption_applications aa 
                             WHERE aa.application_id = ? AND aa.shelter_id = ?
-                        ");
-                        $stmt->execute([$application_id, $shelter_info['shelter_id']]);
-                        $app_info = $stmt->fetch(PDO::FETCH_ASSOC);
+                        ", [$application_id, $shelter_info['shelter_id']]);
                         
                         if ($app_info) {
+                            $db = getDB();
                             $db->beginTransaction();
                             
                             try {
                                 // Delete adoption record if exists
-                                $stmt = $db->prepare("DELETE FROM adoptions WHERE application_id = ?");
-                                $stmt->execute([$application_id]);
+                                DBHelper::execute("DELETE FROM adoptions WHERE application_id = ?", [$application_id]);
                                 
                                 // Delete application
-                                $stmt = $db->prepare("DELETE FROM adoption_applications WHERE application_id = ?");
-                                $stmt->execute([$application_id]);
+                                DBHelper::execute("DELETE FROM adoption_applications WHERE application_id = ?", [$application_id]);
                                 
                                 // Check if pet should be set back to available
-                                $stmt = $db->prepare("
-                                    SELECT COUNT(*) FROM adoption_applications 
-                                    WHERE pet_id = ? AND application_status = 'approved' AND shelter_id = ?
-                                ");
-                                $stmt->execute([$app_info['pet_id'], $shelter_info['shelter_id']]);
-                                $approved_count = $stmt->fetchColumn();
+                                $approved_count = DBHelper::count('adoption_applications', [
+                                    'pet_id' => $app_info['pet_id'],
+                                    'application_status' => 'approved',
+                                    'shelter_id' => $shelter_info['shelter_id']
+                                ]);
                                 
                                 if ($approved_count == 0) {
-                                    $stmt = $db->prepare("UPDATE pets SET status = 'available' WHERE pet_id = ?");
-                                    $stmt->execute([$app_info['pet_id']]);
+                                    DBHelper::execute("UPDATE pets SET status = 'available' WHERE pet_id = ?", [$app_info['pet_id']]);
                                 }
                                 
                                 $db->commit();
@@ -216,136 +180,91 @@ $total_applications = 0;
 $total_pages = 1;
 
 try {
-    require_once __DIR__ . '/../config/db.php';
-    $db = getDB();
-    
-    if (!$db) {
-        throw new Exception("Could not connect to database. Please check your configuration.");
-    }
-    
-    // Get current user info
-    $stmt = $db->prepare("SELECT u.*, s.shelter_name FROM users u LEFT JOIN shelters s ON u.user_id = s.user_id WHERE u.user_id = ?");
-    $stmt->execute([$user_id]);
-    $current_user = $stmt->fetch(PDO::FETCH_ASSOC);
-    
-    if (!$current_user) {
-        throw new Exception("User not found in database");
-    }
-    
     // Get shelter information
-    $stmt = $db->prepare("SELECT * FROM shelters WHERE user_id = ?");
-    $stmt->execute([$user_id]);
-    $shelter_info = $stmt->fetch(PDO::FETCH_ASSOC);
+    $shelter_info = DBHelper::selectOne("SELECT * FROM shelters WHERE user_id = ?", [$user_id]);
     
     if (!$shelter_info) {
         $error_message = "No shelter found for your account. Please contact administrator to set up your shelter profile.";
     } else {
-        // Get statistics - using shelter_id from adoption_applications table
-        try {
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE shelter_id = ?");
-            $stmt->execute([$shelter_info['shelter_id']]);
-            $stats['total_requests'] = $stmt->fetchColumn() ?: 0;
-            
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE shelter_id = ? AND application_status = 'pending'");
-            $stmt->execute([$shelter_info['shelter_id']]);
-            $stats['pending_requests'] = $stmt->fetchColumn() ?: 0;
-            
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE shelter_id = ? AND application_status = 'approved'");
-            $stmt->execute([$shelter_info['shelter_id']]);
-            $stats['approved_requests'] = $stmt->fetchColumn() ?: 0;
-            
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE shelter_id = ? AND application_status = 'rejected'");
-            $stmt->execute([$shelter_info['shelter_id']]);
-            $stats['rejected_requests'] = $stmt->fetchColumn() ?: 0;
-        } catch (Exception $e) {
-            error_log("Statistics error: " . $e->getMessage());
-        }
+        // Get statistics
+        $stats['total_requests'] = DBHelper::count('adoption_applications', ['shelter_id' => $shelter_info['shelter_id']]);
+        $stats['pending_requests'] = DBHelper::count('adoption_applications', ['shelter_id' => $shelter_info['shelter_id'], 'application_status' => 'pending']);
+        $stats['approved_requests'] = DBHelper::count('adoption_applications', ['shelter_id' => $shelter_info['shelter_id'], 'application_status' => 'approved']);
+        $stats['rejected_requests'] = DBHelper::count('adoption_applications', ['shelter_id' => $shelter_info['shelter_id'], 'application_status' => 'rejected']);
         
         // Get pets list for filter dropdown
-        try {
-            $stmt = $db->prepare("SELECT pet_id, pet_name FROM pets WHERE shelter_id = ? ORDER BY pet_name");
-            $stmt->execute([$shelter_info['shelter_id']]);
-            $pets_list = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        } catch (Exception $e) {
-            error_log("Pets list error: " . $e->getMessage());
-            $pets_list = [];
-        }
+        $pets_list = DBHelper::select("SELECT pet_id, pet_name FROM pets WHERE shelter_id = ? ORDER BY pet_name", [$shelter_info['shelter_id']]) ?: [];
         
-        // Build the applications query only if we have applications
+        // Build the applications query
         if ($stats['total_requests'] > 0) {
-            try {
-                $where_conditions = ["aa.shelter_id = ?"];
-                $params = [$shelter_info['shelter_id']];
+            $where_conditions = ["aa.shelter_id = ?"];
+            $params = [$shelter_info['shelter_id']];
+            
+            if (!empty($filter_status)) {
+                $where_conditions[] = "aa.application_status = ?";
+                $params[] = $filter_status;
+            }
+            
+            if (!empty($filter_pet)) {
+                $where_conditions[] = "aa.pet_id = ?";
+                $params[] = $filter_pet;
+            }
+            
+            if (!empty($search_query)) {
+                $where_conditions[] = "(u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR p.pet_name LIKE ?)";
+                $search_param = "%$search_query%";
+                $params[] = $search_param;
+                $params[] = $search_param;
+                $params[] = $search_param;
+                $params[] = $search_param;
+            }
+            
+            $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
+            
+            // Validate sort parameters
+            $valid_sort_fields = ['application_date', 'pet_name', 'first_name', 'application_status'];
+            $sort_by = in_array($sort_by, $valid_sort_fields) ? $sort_by : 'application_date';
+            $sort_order = strtoupper($sort_order) === 'ASC' ? 'ASC' : 'DESC';
+            
+            // Get total count for pagination
+            $count_query = "
+                SELECT COUNT(*) as total 
+                FROM adoption_applications aa
+                JOIN pets p ON aa.pet_id = p.pet_id
+                JOIN users u ON aa.adopter_id = u.user_id
+                $where_clause
+            ";
+            $count_result = DBHelper::selectOne($count_query, $params);
+            $total_applications = $count_result ? (int)$count_result['total'] : 0;
+            $total_pages = ceil($total_applications / $per_page);
+            
+            if ($total_applications > 0) {
+                // Map sort field to actual column
+                $sort_field = $sort_by === 'application_date' ? 'aa.application_date' : 
+                             ($sort_by === 'pet_name' ? 'p.pet_name' : 
+                             ($sort_by === 'first_name' ? 'u.first_name' : 'aa.application_status'));
                 
-                if (!empty($filter_status)) {
-                    $where_conditions[] = "aa.application_status = ?";
-                    $params[] = $filter_status;
-                }
-                
-                if (!empty($filter_pet)) {
-                    $where_conditions[] = "aa.pet_id = ?";
-                    $params[] = $filter_pet;
-                }
-                
-                if (!empty($search_query)) {
-                    $where_conditions[] = "(u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR p.pet_name LIKE ?)";
-                    $params[] = "%$search_query%";
-                    $params[] = "%$search_query%";
-                    $params[] = "%$search_query%";
-                    $params[] = "%$search_query%";
-                }
-                
-                $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
-                
-                // Validate sort parameters
-                $valid_sort_fields = ['application_date', 'pet_name', 'first_name', 'application_status'];
-                $sort_by = in_array($sort_by, $valid_sort_fields) ? $sort_by : 'application_date';
-                $sort_order = strtoupper($sort_order) === 'ASC' ? 'ASC' : 'DESC';
-                
-                // Get total count for pagination
-                $count_query = "
-                    SELECT COUNT(*) as total 
+                // Get applications with pagination
+                $applications_query = "
+                    SELECT aa.*, 
+                           p.pet_name, p.age, p.gender, p.size, p.primary_image, p.status as pet_status,
+                           u.first_name, u.last_name, u.email, u.phone, u.address,
+                           pc.category_name,
+                           pb.breed_name,
+                           reviewer.first_name as reviewer_first_name,
+                           reviewer.last_name as reviewer_last_name
                     FROM adoption_applications aa
                     JOIN pets p ON aa.pet_id = p.pet_id
                     JOIN users u ON aa.adopter_id = u.user_id
+                    LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
+                    LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
+                    LEFT JOIN users reviewer ON aa.reviewed_by = reviewer.user_id
                     $where_clause
+                    ORDER BY {$sort_field} {$sort_order}
+                    LIMIT $per_page OFFSET $offset
                 ";
-                $stmt = $db->prepare($count_query);
-                $stmt->execute($params);
-                $total_applications = $stmt->fetch()['total'] ?? 0;
-                $total_pages = ceil($total_applications / $per_page);
                 
-                if ($total_applications > 0) {
-                    // Map sort field to actual column
-                    $sort_field = $sort_by === 'application_date' ? 'aa.application_date' : 
-                                 ($sort_by === 'pet_name' ? 'p.pet_name' : 
-                                 ($sort_by === 'first_name' ? 'u.first_name' : 'aa.application_status'));
-                    
-                    // Get applications with pagination
-                    $applications_query = "
-                        SELECT aa.*, 
-                               p.pet_name, p.species, p.age, p.primary_image, p.status as pet_status,
-                               u.first_name, u.last_name, u.email, u.phone, u.address,
-                               pc.category_name,
-                               reviewer.first_name as reviewer_first_name,
-                               reviewer.last_name as reviewer_last_name
-                        FROM adoption_applications aa
-                        JOIN pets p ON aa.pet_id = p.pet_id
-                        JOIN users u ON aa.adopter_id = u.user_id
-                        LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
-                        LEFT JOIN users reviewer ON aa.reviewed_by = reviewer.user_id
-                        $where_clause
-                        ORDER BY {$sort_field} {$sort_order}
-                        LIMIT $per_page OFFSET $offset
-                    ";
-                    
-                    $stmt = $db->prepare($applications_query);
-                    $stmt->execute($params);
-                    $applications = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-                }
-            } catch (Exception $e) {
-                error_log("Applications query error: " . $e->getMessage());
-                $applications = [];
+                $applications = DBHelper::select($applications_query, $params) ?: [];
             }
         }
     }
@@ -355,6 +274,7 @@ try {
     $error_message = "Database error: " . $e->getMessage();
 }
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -396,6 +316,7 @@ try {
         align-items: center;
         flex-wrap: wrap;
         gap: 20px;
+        box-shadow: 0 10px 30px rgba(253, 126, 20, 0.3);
     }
 
     .page-header h1 {
@@ -428,6 +349,13 @@ try {
         align-items: center;
         gap: 8px;
         cursor: pointer;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        text-decoration: none;
     }
 
     .btn-primary {
@@ -437,8 +365,6 @@ try {
 
     .btn-primary:hover {
         background: #ffed4e;
-        transform: translateY(-2px);
-        text-decoration: none;
         color: #e83e8c;
     }
 
@@ -450,7 +376,6 @@ try {
 
     .btn-secondary:hover {
         background: rgba(255, 255, 255, 0.3);
-        text-decoration: none;
         color: white;
     }
 
@@ -503,16 +428,7 @@ try {
         position: relative;
         overflow: hidden;
         cursor: pointer;
-    }
-
-    .stat-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        background: var(--color);
+        border-top: 4px solid var(--color);
     }
 
     .stat-card:hover {
@@ -619,6 +535,7 @@ try {
     .control-group input:focus {
         outline: none;
         border-color: #fd7e14;
+        box-shadow: 0 0 0 3px rgba(253, 126, 20, 0.1);
     }
 
     .search-group {
@@ -704,6 +621,14 @@ try {
         justify-content: center;
         color: #999;
         font-size: 2rem;
+        border: 2px solid #e9ecef;
+    }
+
+    .pet-image img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 8px;
     }
 
     .pet-details h3 {
@@ -727,21 +652,27 @@ try {
         font-size: 0.8rem;
         font-weight: 600;
         text-transform: uppercase;
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
     }
 
     .status-pending {
         background: rgba(255, 193, 7, 0.2);
         color: #ffc107;
+        border: 1px solid rgba(255, 193, 7, 0.3);
     }
 
     .status-approved {
         background: rgba(40, 167, 69, 0.2);
         color: #28a745;
+        border: 1px solid rgba(40, 167, 69, 0.3);
     }
 
     .status-rejected {
         background: rgba(220, 53, 69, 0.2);
         color: #dc3545;
+        border: 1px solid rgba(220, 53, 69, 0.3);
     }
 
     .application-content {
@@ -756,6 +687,7 @@ try {
         background: #f8f9fa;
         padding: 20px;
         border-radius: 10px;
+        border: 1px solid #e9ecef;
     }
 
     .info-title {
@@ -771,6 +703,7 @@ try {
     .info-row {
         display: flex;
         justify-content: space-between;
+        align-items: center;
         padding: 8px 0;
         border-bottom: 1px solid rgba(0, 0, 0, 0.1);
     }
@@ -832,6 +765,20 @@ try {
         line-height: 1.6;
     }
 
+    /* Error Message */
+    .message.error {
+        background: rgba(220, 53, 69, 0.1);
+        color: #dc3545;
+        border: 1px solid rgba(220, 53, 69, 0.3);
+        padding: 15px 20px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+    }
+
     /* Pagination */
     .pagination-section {
         display: flex;
@@ -877,15 +824,46 @@ try {
         width: 100%;
         height: 100%;
         background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(5px);
+    }
+
+    .modal.show {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: modalFadeIn 0.3s ease;
+    }
+
+    @keyframes modalFadeIn {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
     }
 
     .modal-content {
         background: white;
-        margin: 5% auto;
-        padding: 0;
         border-radius: 15px;
         width: 90%;
         max-width: 600px;
+        max-height: 90vh;
+        overflow-y: auto;
+        animation: modalSlideIn 0.3s ease;
+    }
+
+    @keyframes modalSlideIn {
+        from {
+            transform: translateY(-50px);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
     }
 
     .modal-header {
@@ -901,6 +879,7 @@ try {
     .modal-title {
         font-size: 1.3rem;
         font-weight: 600;
+        margin: 0;
     }
 
     .modal-close {
@@ -909,6 +888,12 @@ try {
         font-size: 1.5rem;
         cursor: pointer;
         color: white;
+        padding: 5px;
+        transition: opacity 0.3s ease;
+    }
+
+    .modal-close:hover {
+        opacity: 0.8;
     }
 
     .modal-body {
@@ -951,6 +936,7 @@ try {
     .form-group textarea:focus {
         outline: none;
         border-color: #fd7e14;
+        box-shadow: 0 0 0 3px rgba(253, 126, 20, 0.1);
     }
 
     .form-group textarea {
@@ -958,7 +944,7 @@ try {
         min-height: 100px;
     }
 
-    /* Messages */
+    /* Success/Error Messages */
     .message {
         position: fixed;
         top: 20px;
@@ -993,18 +979,6 @@ try {
         }
     }
 
-    .message.error {
-        background: rgba(220, 53, 69, 0.1);
-        color: #dc3545;
-        border: 1px solid rgba(220, 53, 69, 0.3);
-        position: static;
-        margin-bottom: 20px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        font-weight: 600;
-    }
-
     /* Responsive Design */
     @media (max-width: 768px) {
         .container {
@@ -1014,6 +988,11 @@ try {
         .page-header {
             flex-direction: column;
             text-align: center;
+            padding: 25px;
+        }
+
+        .page-header h1 {
+            font-size: 1.8rem;
         }
 
         .stats-grid {
@@ -1029,11 +1008,34 @@ try {
             grid-template-columns: 1fr;
             gap: 20px;
         }
+
+        .pet-info {
+            flex-direction: column;
+            text-align: center;
+        }
+
+        .application-actions {
+            flex-direction: column;
+        }
     }
 
     @media (max-width: 480px) {
         .stats-grid {
             grid-template-columns: 1fr;
+        }
+
+        .section-header {
+            flex-direction: column;
+            text-align: center;
+        }
+
+        .modal-content {
+            width: 95%;
+            margin: 10px;
+        }
+
+        .modal-actions {
+            flex-direction: column;
         }
     }
     </style>
@@ -1041,7 +1043,7 @@ try {
 
 <body>
     <!-- Include Shelter Navbar -->
-    <?php include_once __DIR__ . '/../common/navbar_shelter.php'; ?>
+    <?php include_once '../common/navbar_shelter.php'; ?>
 
     <div class="container">
         <!-- Page Header -->
@@ -1051,10 +1053,10 @@ try {
                 <p>Review and manage adoption applications for your pets</p>
             </div>
             <div class="header-actions">
-                <a href="<?php echo $BASE_URL; ?>shelter/viewPets.php" class="btn btn-secondary">
+                <a href="viewPets.php" class="btn btn-secondary">
                     <i class="fas fa-list"></i> View Pets
                 </a>
-                <a href="<?php echo $BASE_URL; ?>shelter/dashboard.php" class="btn btn-primary">
+                <a href="dashboard.php" class="btn btn-primary">
                     <i class="fas fa-tachometer-alt"></i> Dashboard
                 </a>
             </div>
@@ -1188,7 +1190,7 @@ try {
                         <button type="submit" class="btn btn-primary">
                             <i class="fas fa-filter"></i> Apply Filters
                         </button>
-                        <a href="<?php echo $BASE_URL; ?>shelter/adoptionRequests.php" class="btn btn-secondary">
+                        <a href="adoptionRequests.php" class="btn btn-secondary">
                             <i class="fas fa-times"></i> Clear
                         </a>
                     </div>
@@ -1223,25 +1225,29 @@ try {
                 <!-- Application Header -->
                 <div class="application-header">
                     <div class="pet-info">
-                        <?php if (!empty($app['primary_image'])): ?>
-                        <img src="<?php echo $BASE_URL . 'uploads/pets/' . htmlspecialchars($app['primary_image']); ?>"
-                            alt="<?php echo htmlspecialchars($app['pet_name']); ?>" class="pet-image">
-                        <?php else: ?>
                         <div class="pet-image">
+                            <?php if (!empty($app['primary_image']) && file_exists("../uploads/" . $app['primary_image'])): ?>
+                            <img src="../uploads/<?php echo htmlspecialchars($app['primary_image']); ?>"
+                                alt="<?php echo htmlspecialchars($app['pet_name']); ?>">
+                            <?php else: ?>
                             <i class="fas fa-paw"></i>
+                            <?php endif; ?>
                         </div>
-                        <?php endif; ?>
 
                         <div class="pet-details">
                             <h3><?php echo htmlspecialchars($app['pet_name']); ?></h3>
                             <div class="pet-meta">
                                 <span><i class="fas fa-tag"></i>
-                                    <?php echo htmlspecialchars($app['species'] ?? 'Unknown'); ?></span>
-                                <span><i class="fas fa-birthday-cake"></i>
-                                    <?php echo htmlspecialchars($app['age'] ?? 'Unknown'); ?> years old</span>
-                                <?php if (!empty($app['category_name'])): ?>
-                                <span><i class="fas fa-folder"></i>
-                                    <?php echo htmlspecialchars($app['category_name']); ?></span>
+                                    <?php echo htmlspecialchars($app['category_name'] ?? 'Unknown'); ?></span>
+                                <?php if ($app['breed_name']): ?>
+                                <span><i class="fas fa-dna"></i>
+                                    <?php echo htmlspecialchars($app['breed_name']); ?></span>
+                                <?php endif; ?>
+                                <span><i class="fas fa-birthday-cake"></i> <?php echo (int)$app['age']; ?> years
+                                    old</span>
+                                <span><i class="fas fa-venus-mars"></i> <?php echo ucfirst($app['gender']); ?></span>
+                                <?php if ($app['size']): ?>
+                                <span><i class="fas fa-ruler"></i> <?php echo ucfirst($app['size']); ?></span>
                                 <?php endif; ?>
                             </div>
                         </div>
@@ -1250,19 +1256,26 @@ try {
                     <div style="text-align: right;">
                         <div class="status-badge status-<?php echo $app['application_status']; ?>">
                             <?php 
-                                    switch($app['application_status']) {
-                                        case 'pending': echo '<i class="fas fa-hourglass-half"></i> Pending'; break;
-                                        case 'approved': echo '<i class="fas fa-check-circle"></i> Approved'; break;
-                                        case 'rejected': echo '<i class="fas fa-times-circle"></i> Rejected'; break;
-                                        default: echo ucfirst($app['application_status']);
-                                    }
-                                    ?>
+                            switch($app['application_status']) {
+                                case 'pending': 
+                                    echo '<i class="fas fa-hourglass-half"></i> Pending'; 
+                                    break;
+                                case 'approved': 
+                                    echo '<i class="fas fa-check-circle"></i> Approved'; 
+                                    break;
+                                case 'rejected': 
+                                    echo '<i class="fas fa-times-circle"></i> Rejected'; 
+                                    break;
+                                default: 
+                                    echo ucfirst($app['application_status']);
+                            }
+                            ?>
                         </div>
-                        <div class="text-muted mt-2" style="font-size: 0.8rem;">
+                        <div style="font-size: 0.8rem; color: #666; margin-top: 8px;">
                             Applied: <?php echo date('M j, Y g:i A', strtotime($app['application_date'])); ?>
                         </div>
                         <?php if (!empty($app['reviewer_first_name'])): ?>
-                        <div class="text-muted" style="font-size: 0.8rem;">
+                        <div style="font-size: 0.8rem; color: #666;">
                             Reviewed by:
                             <?php echo htmlspecialchars($app['reviewer_first_name'] . ' ' . $app['reviewer_last_name']); ?>
                         </div>
@@ -1287,7 +1300,8 @@ try {
                         <div class="info-row">
                             <span class="info-label">Email:</span>
                             <span class="info-value">
-                                <a href="mailto:<?php echo htmlspecialchars($app['email']); ?>" style="color: inherit;">
+                                <a href="mailto:<?php echo htmlspecialchars($app['email']); ?>"
+                                    style="color: #fd7e14; text-decoration: none;">
                                     <?php echo htmlspecialchars($app['email']); ?>
                                 </a>
                             </span>
@@ -1297,7 +1311,8 @@ try {
                         <div class="info-row">
                             <span class="info-label">Phone:</span>
                             <span class="info-value">
-                                <a href="tel:<?php echo htmlspecialchars($app['phone']); ?>" style="color: inherit;">
+                                <a href="tel:<?php echo htmlspecialchars($app['phone']); ?>"
+                                    style="color: #fd7e14; text-decoration: none;">
                                     <?php echo htmlspecialchars($app['phone']); ?>
                                 </a>
                             </span>
@@ -1321,31 +1336,27 @@ try {
                         <?php if (!empty($app['housing_type'])): ?>
                         <div class="info-row">
                             <span class="info-label">Housing:</span>
-                            <span class="info-value"><?php echo htmlspecialchars($app['housing_type']); ?></span>
+                            <span
+                                class="info-value"><?php echo htmlspecialchars(ucfirst($app['housing_type'])); ?></span>
                         </div>
                         <?php endif; ?>
 
                         <div class="info-row">
                             <span class="info-label">Experience:</span>
                             <span class="info-value">
-                                <?php echo $app['has_experience'] ? '<i class="fas fa-check text-success"></i> Yes' : '<i class="fas fa-times text-danger"></i> No'; ?>
+                                <?php if ($app['has_experience']): ?>
+                                <span style="color: #28a745;"><i class="fas fa-check"></i> Yes</span>
+                                <?php else: ?>
+                                <span style="color: #dc3545;"><i class="fas fa-times"></i> No</span>
+                                <?php endif; ?>
                             </span>
                         </div>
 
-                        <?php if (!empty($app['previous_pets'])): ?>
                         <div class="info-row">
-                            <span class="info-label">Previous Pets:</span>
-                            <span class="info-value"><?php echo htmlspecialchars($app['previous_pets']); ?></span>
+                            <span class="info-label">App Date:</span>
+                            <span
+                                class="info-value"><?php echo date('M j, Y', strtotime($app['application_date'])); ?></span>
                         </div>
-                        <?php endif; ?>
-
-                        <?php if (!empty($app['household_members'])): ?>
-                        <div class="info-row">
-                            <span class="info-label">Household:</span>
-                            <span class="info-value"><?php echo htmlspecialchars($app['household_members']); ?>
-                                members</span>
-                        </div>
-                        <?php endif; ?>
                     </div>
                 </div>
 
@@ -1401,17 +1412,17 @@ try {
                     <?php endif; ?>
 
                     <?php
-                            $start_page = max(1, $page - 2);
-                            $end_page = min($total_pages, $page + 2);
-                            
-                            if ($start_page > 1): ?>
+                    $start_page = max(1, $page - 2);
+                    $end_page = min($total_pages, $page + 2);
+                    
+                    if ($start_page > 1): ?>
                     <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => 1])); ?>">1</a>
                     <?php if ($start_page > 2): ?>
                     <span>...</span>
                     <?php endif;
-                            endif;
+                    endif;
 
-                            for ($i = $start_page; $i <= $end_page; $i++): ?>
+                    for ($i = $start_page; $i <= $end_page; $i++): ?>
                     <?php if ($i == $page): ?>
                     <span class="current"><?php echo $i; ?></span>
                     <?php else: ?>
@@ -1419,7 +1430,7 @@ try {
                     <?php endif; ?>
                     <?php endfor;
 
-                            if ($end_page < $total_pages): ?>
+                    if ($end_page < $total_pages): ?>
                     <?php if ($end_page < $total_pages - 1): ?>
                     <span>...</span>
                     <?php endif; ?>
@@ -1427,7 +1438,7 @@ try {
                         href="?<?php echo http_build_query(array_merge($_GET, ['page' => $total_pages])); ?>"><?php echo $total_pages; ?></a>
                     <?php endif;
 
-                            if ($page < $total_pages): ?>
+                    if ($page < $total_pages): ?>
                     <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>">
                         Next <i class="fas fa-chevron-right"></i>
                     </a>
@@ -1453,11 +1464,11 @@ try {
                     <?php endif; ?>
                 </p>
                 <?php if ($stats['total_requests'] === 0): ?>
-                <a href="<?php echo $BASE_URL; ?>shelter/addPet.php" class="btn btn-primary">
+                <a href="addPet.php" class="btn btn-primary">
                     <i class="fas fa-plus"></i> Add Your First Pet
                 </a>
                 <?php else: ?>
-                <a href="<?php echo $BASE_URL; ?>shelter/adoptionRequests.php" class="btn btn-primary">
+                <a href="adoptionRequests.php" class="btn btn-primary">
                     <i class="fas fa-times"></i> Clear Filters
                 </a>
                 <?php endif; ?>
@@ -1495,7 +1506,8 @@ try {
             </div>
             <div class="modal-actions">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('statusModal')">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="submitStatusUpdate()">Update Status</button>
+                <button type="button" class="btn btn-primary" onclick="submitStatusUpdate()" id="submitStatusBtn">Update
+                    Status</button>
             </div>
         </div>
     </div>
@@ -1518,8 +1530,10 @@ try {
 
     <script>
     // Global variables
-    const BASE_URL = '<?php echo $BASE_URL; ?>';
     let currentApplicationId = null;
+
+    // Store applications data for JavaScript access
+    const applications = <?php echo json_encode($applications); ?>;
 
     // Filter by status (used by stat cards)
     function filterByStatus(status) {
@@ -1536,9 +1550,11 @@ try {
         // Set form values
         document.getElementById('statusApplicationId').value = applicationId;
         document.getElementById('statusSelect').value = newStatus;
+        document.getElementById('adminNotes').value = '';
 
         // Show modal
-        document.getElementById('statusModal').style.display = 'block';
+        document.getElementById('statusModal').classList.add('show');
+        document.body.style.overflow = 'hidden';
     }
 
     // Submit status update
@@ -1548,7 +1564,7 @@ try {
         formData.append('action', 'update_status');
 
         // Show loading
-        const submitBtn = event.target;
+        const submitBtn = document.getElementById('submitStatusBtn');
         const originalText = submitBtn.innerHTML;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Updating...';
         submitBtn.disabled = true;
@@ -1590,6 +1606,12 @@ try {
         formData.append('action', 'delete_application');
         formData.append('application_id', applicationId);
 
+        // Show loading on the delete button
+        const deleteBtn = event.target.closest('button');
+        const originalText = deleteBtn.innerHTML;
+        deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Deleting...';
+        deleteBtn.disabled = true;
+
         fetch(window.location.href, {
                 method: 'POST',
                 headers: {
@@ -1604,28 +1626,97 @@ try {
                     setTimeout(() => location.reload(), 1000);
                 } else {
                     showMessage(data.message, 'error');
+                    deleteBtn.innerHTML = originalText;
+                    deleteBtn.disabled = false;
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
                 showMessage('An error occurred while deleting the application', 'error');
+                deleteBtn.innerHTML = originalText;
+                deleteBtn.disabled = false;
             });
     }
 
     // View application details
     function viewApplicationDetails(applicationId) {
-        // For now, just show the modal with basic info
-        // In a full implementation, you'd load detailed info via AJAX
-        document.getElementById('detailsModalBody').innerHTML = `
-                <p>Detailed view for application #${applicationId}</p>
-                <p>This feature can be enhanced to show complete application history, notes, and other relevant information.</p>
+        const application = applications.find(app => app.application_id == applicationId);
+
+        if (application) {
+            document.getElementById('detailsModalBody').innerHTML = `
+                <div class="application-details-full">
+                    <h4><i class="fas fa-paw"></i> Pet Information</h4>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                        <p><strong>Name:</strong> ${escapeHtml(application.pet_name)}</p>
+                        <p><strong>Category:</strong> ${escapeHtml(application.category_name || 'Unknown')}</p>
+                        ${application.breed_name ? `<p><strong>Breed:</strong> ${escapeHtml(application.breed_name)}</p>` : ''}
+                        <p><strong>Age:</strong> ${application.age} years old</p>
+                        <p><strong>Gender:</strong> ${escapeHtml(application.gender)}</p>
+                        ${application.size ? `<p><strong>Size:</strong> ${escapeHtml(application.size)}</p>` : ''}
+                    </div>
+
+                    <h4><i class="fas fa-user"></i> Adopter Information</h4>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                        <p><strong>Name:</strong> ${escapeHtml(application.first_name + ' ' + application.last_name)}</p>
+                        <p><strong>Email:</strong> <a href="mailto:${escapeHtml(application.email)}" style="color: #fd7e14;">${escapeHtml(application.email)}</a></p>
+                        ${application.phone ? `<p><strong>Phone:</strong> <a href="tel:${escapeHtml(application.phone)}" style="color: #fd7e14;">${escapeHtml(application.phone)}</a></p>` : ''}
+                        ${application.address ? `<p><strong>Address:</strong> ${escapeHtml(application.address)}</p>` : ''}
+                    </div>
+
+                    <h4><i class="fas fa-clipboard"></i> Application Information</h4>
+                    <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                        <p><strong>Applied Date:</strong> ${new Date(application.application_date).toLocaleDateString('en-US', { 
+                            year: 'numeric', 
+                            month: 'long', 
+                            day: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit'
+                        })}</p>
+                        <p><strong>Status:</strong> <span class="status-badge status-${application.application_status}">${application.application_status.charAt(0).toUpperCase() + application.application_status.slice(1)}</span></p>
+                        ${application.housing_type ? `<p><strong>Housing Type:</strong> ${escapeHtml(application.housing_type)}</p>` : ''}
+                        <p><strong>Has Pet Experience:</strong> ${application.has_experience ? 'Yes' : 'No'}</p>
+                        ${application.reviewer_first_name ? `<p><strong>Reviewed by:</strong> ${escapeHtml(application.reviewer_first_name + ' ' + application.reviewer_last_name)}</p>` : ''}
+                    </div>
+
+                    ${application.reason_for_adoption ? `
+                        <h4><i class="fas fa-heart"></i> Reason for Adoption</h4>
+                        <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; border-left: 4px solid #2196f3;">
+                            <p style="font-style: italic;">"${escapeHtml(application.reason_for_adoption).replace(/\n/g, '<br>')}"</p>
+                        </div>
+                    ` : ''}
+                </div>
             `;
-        document.getElementById('detailsModal').style.display = 'block';
+        } else {
+            document.getElementById('detailsModalBody').innerHTML = `
+                <p style="text-align: center; color: #dc3545;">
+                    <i class="fas fa-exclamation-triangle"></i> 
+                    Application details not found.
+                </p>
+            `;
+        }
+
+        document.getElementById('detailsModal').classList.add('show');
+        document.body.style.overflow = 'hidden';
     }
 
     // Modal functions
     function closeModal(modalId) {
-        document.getElementById(modalId).style.display = 'none';
+        document.getElementById(modalId).classList.remove('show');
+        document.body.style.overflow = 'auto';
+    }
+
+    // Escape HTML to prevent XSS
+    function escapeHtml(text) {
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return text ? String(text).replace(/[&<>"']/g, function(m) {
+            return map[m];
+        }) : '';
     }
 
     // Show message
@@ -1633,9 +1724,9 @@ try {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${type}`;
         messageDiv.innerHTML = `
-                <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
-                ${message}
-            `;
+            <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+            ${message}
+        `;
 
         document.body.appendChild(messageDiv);
 
@@ -1652,15 +1743,34 @@ try {
         }
     });
 
+    // Search on Enter key
+    document.getElementById('search').addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            document.getElementById('filtersForm').submit();
+        }
+    });
+
     // Close modals when clicking outside
-    window.onclick = function(event) {
-        const modals = document.querySelectorAll('.modal');
+    document.addEventListener('click', function(event) {
+        const modals = document.querySelectorAll('.modal.show');
         modals.forEach(modal => {
             if (event.target === modal) {
-                modal.style.display = 'none';
+                const modalId = modal.id;
+                closeModal(modalId);
             }
         });
-    };
+    });
+
+    // Close modals with Escape key
+    document.addEventListener('keydown', function(event) {
+        if (event.key === 'Escape') {
+            const openModals = document.querySelectorAll('.modal.show');
+            openModals.forEach(modal => {
+                closeModal(modal.id);
+            });
+        }
+    });
 
     // Initialize page
     document.addEventListener('DOMContentLoaded', function() {
@@ -1670,7 +1780,31 @@ try {
             searchInput.focus();
             searchInput.setSelectionRange(searchInput.value.length, searchInput.value.length);
         }
+
+        // Add loading animation to cards
+        const cards = document.querySelectorAll('.application-card');
+        cards.forEach((card, index) => {
+            card.style.opacity = '0';
+            card.style.transform = 'translateY(20px)';
+            card.style.transition =
+                `opacity 0.3s ease ${index * 0.1}s, transform 0.3s ease ${index * 0.1}s`;
+
+            setTimeout(() => {
+                card.style.opacity = '1';
+                card.style.transform = 'translateY(0)';
+            }, index * 100);
+        });
+
+        console.log('Adoption Requests page loaded successfully');
+        console.log(`Total applications: ${applications.length}`);
     });
+
+    // Refresh data periodically (every 5 minutes)
+    setInterval(function() {
+        if (!document.querySelector('.modal.show')) {
+            location.reload();
+        }
+    }, 300000); // 5 minutes
     </script>
 </body>
 
