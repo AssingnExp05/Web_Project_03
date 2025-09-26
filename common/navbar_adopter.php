@@ -1,937 +1,986 @@
 <?php
-// common/navbar.php - Dynamic Navigation Bar
-// This file should be included in header.php
-
-// Ensure session is started and user info is available
-if (!isset($_SESSION)) {
+// Ensure session is started
+if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// Get current page info
-$current_page = basename($_SERVER['PHP_SELF']);
-$current_dir = basename(dirname($_SERVER['PHP_SELF']));
+// Check if user is logged in as adopter
+if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] !== 'adopter') {
+    // Redirect to login if not logged in as adopter
+    header('Location: ../auth/login.php');
+    exit();
+}
 
-// Check if user is logged in
-$is_logged_in = isset($_SESSION['user_id']) && isset($_SESSION['user_type']);
-$user_type = $_SESSION['user_type'] ?? '';
-$user_name = ($_SESSION['first_name'] ?? '') . ' ' . ($_SESSION['last_name'] ?? '');
+// Get user information
+$user_name = $_SESSION['first_name'] ?? 'User';
 $user_email = $_SESSION['email'] ?? '';
 
-// Define BASE_URL if not already defined
-if (!defined('BASE_URL')) {
-    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
-    $host = $_SERVER['HTTP_HOST'];
-    $path = str_replace(basename($_SERVER['SCRIPT_NAME']), '', $_SERVER['SCRIPT_NAME']);
-    define('BASE_URL', $protocol . $host . $path);
+// Determine current page for active navigation
+$current_page = basename($_SERVER['PHP_SELF'], '.php');
+$current_dir = basename(dirname($_SERVER['PHP_SELF']));
+
+// Helper function to check if nav item is active
+function isActive($page, $current_page) {
+    return $page === $current_page ? 'active' : '';
 }
+
+// Helper function to get correct path based on current directory
+function getPath($path, $current_dir) {
+    if ($current_dir === 'adopter') {
+        return $path; // Already in adopter directory
+    } else {
+        return 'adopter/' . $path; // From root or other directory
+    }
+}
+
+// Define base path for navigation
+$base_path = ($current_dir === 'adopter') ? '' : 'adopter/';
+$auth_path = ($current_dir === 'adopter') ? '../auth/' : 'auth/';
 ?>
 
-<style>
-/* Navbar Specific Styles */
-.navbar {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-    position: sticky;
-    top: 0;
-    z-index: 1000;
-    backdrop-filter: blur(10px);
-    transition: all 0.3s ease;
-}
+<!DOCTYPE html>
+<html lang="en">
 
-.navbar.scrolled {
-    background: rgba(102, 126, 234, 0.95);
-    backdrop-filter: blur(15px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-}
-
-.navbar-container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 20px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    min-height: 70px;
-    position: relative;
-}
-
-/* Logo */
-.navbar-brand {
-    display: flex;
-    align-items: center;
-    text-decoration: none;
-    color: white;
-    font-weight: 700;
-    font-size: 1.5rem;
-    transition: all 0.3s ease;
-    z-index: 1001;
-}
-
-.navbar-brand:hover {
-    color: #ffd700;
-    transform: scale(1.05);
-    text-decoration: none;
-}
-
-.brand-icon {
-    font-size: 2rem;
-    margin-right: 10px;
-    color: #ffd700;
-    animation: pulse 2s infinite;
-}
-
-/* Navigation Menu */
-.navbar-nav {
-    display: flex;
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    align-items: center;
-    gap: 5px;
-}
-
-.nav-item {
-    position: relative;
-}
-
-.nav-link {
-    color: white;
-    text-decoration: none;
-    padding: 12px 18px;
-    border-radius: 25px;
-    font-weight: 500;
-    font-size: 0.95rem;
-    transition: all 0.3s ease;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    position: relative;
-    overflow: hidden;
-}
-
-.nav-link::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -100%;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-    transition: left 0.5s;
-}
-
-.nav-link:hover::before {
-    left: 100%;
-}
-
-.nav-link:hover,
-.nav-link.active {
-    background: rgba(255, 255, 255, 0.2);
-    backdrop-filter: blur(10px);
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
-    text-decoration: none;
-    color: white;
-}
-
-.nav-link.active {
-    background: rgba(255, 215, 0, 0.3);
-    color: #ffd700;
-    font-weight: 600;
-}
-
-.nav-icon {
-    font-size: 1.1rem;
-}
-
-/* Dropdown Menu */
-.dropdown {
-    position: relative;
-}
-
-.dropdown-menu {
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    background: white;
-    min-width: 220px;
-    border-radius: 15px;
-    box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
-    opacity: 0;
-    visibility: hidden;
-    transform: translateX(-50%) translateY(-10px);
-    transition: all 0.3s ease;
-    z-index: 1002;
-    overflow: hidden;
-    margin-top: 10px;
-}
-
-.dropdown:hover .dropdown-menu {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(-50%) translateY(0);
-}
-
-.dropdown-menu::before {
-    content: '';
-    position: absolute;
-    top: -8px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 16px;
-    height: 16px;
-    background: white;
-    border-radius: 3px;
-    transform: translateX(-50%) rotate(45deg);
-}
-
-.dropdown-item {
-    display: block;
-    padding: 12px 20px;
-    color: #333;
-    text-decoration: none;
-    font-weight: 500;
-    transition: all 0.3s ease;
-    border-bottom: 1px solid #f8f9fa;
-}
-
-.dropdown-item:last-child {
-    border-bottom: none;
-}
-
-.dropdown-item:hover {
-    background: linear-gradient(135deg, #667eea, #764ba2);
-    color: white;
-    text-decoration: none;
-    padding-left: 25px;
-}
-
-.dropdown-item i {
-    width: 20px;
-    margin-right: 10px;
-    text-align: center;
-}
-
-/* User Menu */
-.user-menu {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-}
-
-.user-info {
-    display: flex;
-    align-items: center;
-    color: white;
-    font-weight: 500;
-    gap: 12px;
-}
-
-.user-avatar {
-    width: 40px;
-    height: 40px;
-    background: linear-gradient(135deg, #ffd700, #ffed4e);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-    color: #667eea;
-    font-size: 1.1rem;
-    box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3);
-    transition: all 0.3s ease;
-}
-
-.user-avatar:hover {
-    transform: scale(1.1);
-    box-shadow: 0 8px 25px rgba(255, 215, 0, 0.4);
-}
-
-.user-details {
-    display: flex;
-    flex-direction: column;
-}
-
-.user-name {
-    font-weight: 600;
-    font-size: 0.95rem;
-}
-
-.user-role {
-    font-size: 0.8rem;
-    opacity: 0.8;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-/* Auth Buttons */
-.auth-buttons {
-    display: flex;
-    gap: 12px;
-}
-
-.btn-nav {
-    padding: 10px 20px;
-    border-radius: 25px;
-    text-decoration: none;
-    font-weight: 600;
-    font-size: 0.9rem;
-    transition: all 0.3s ease;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border: none;
-    cursor: pointer;
-}
-
-.btn-login {
-    background: transparent;
-    color: white;
-    border: 2px solid rgba(255, 255, 255, 0.5);
-}
-
-.btn-login:hover {
-    background: rgba(255, 255, 255, 0.2);
-    border-color: white;
-    text-decoration: none;
-    color: white;
-    transform: translateY(-2px);
-}
-
-.btn-register {
-    background: #ffd700;
-    color: #667eea;
-    border: 2px solid #ffd700;
-}
-
-.btn-register:hover {
-    background: #ffed4e;
-    transform: translateY(-2px);
-    box-shadow: 0 8px 20px rgba(255, 215, 0, 0.3);
-    text-decoration: none;
-    color: #5a67d8;
-}
-
-.btn-logout {
-    background: rgba(231, 76, 60, 0.2);
-    color: white;
-    border: 2px solid rgba(231, 76, 60, 0.5);
-}
-
-.btn-logout:hover {
-    background: #e74c3c;
-    border-color: #e74c3c;
-    text-decoration: none;
-    color: white;
-}
-
-/* Mobile Menu Toggle */
-.mobile-menu-toggle {
-    display: none;
-    background: rgba(255, 255, 255, 0.2);
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    color: white;
-    width: 45px;
-    height: 45px;
-    border-radius: 10px;
-    cursor: pointer;
-    font-size: 1.2rem;
-    transition: all 0.3s ease;
-    backdrop-filter: blur(10px);
-}
-
-.mobile-menu-toggle:hover {
-    background: rgba(255, 255, 255, 0.3);
-    border-color: rgba(255, 255, 255, 0.5);
-    transform: scale(1.05);
-}
-
-.mobile-menu-toggle.active {
-    background: rgba(231, 76, 60, 0.8);
-    border-color: #e74c3c;
-}
-
-/* Notifications */
-.notification-badge {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    background: #e74c3c;
-    color: white;
-    font-size: 0.7rem;
-    font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 10px;
-    min-width: 18px;
-    height: 18px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    animation: bounce 2s infinite;
-}
-
-/* Search Bar (if needed) */
-.navbar-search {
-    position: relative;
-    margin: 0 20px;
-}
-
-.search-input {
-    background: rgba(255, 255, 255, 0.2);
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    border-radius: 25px;
-    padding: 10px 45px 10px 20px;
-    color: white;
-    font-size: 0.9rem;
-    width: 250px;
-    transition: all 0.3s ease;
-    backdrop-filter: blur(10px);
-}
-
-.search-input::placeholder {
-    color: rgba(255, 255, 255, 0.7);
-}
-
-.search-input:focus {
-    outline: none;
-    background: rgba(255, 255, 255, 0.3);
-    border-color: #ffd700;
-    width: 300px;
-}
-
-.search-btn {
-    position: absolute;
-    right: 5px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: #ffd700;
-    border: none;
-    width: 35px;
-    height: 35px;
-    border-radius: 50%;
-    color: #667eea;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.search-btn:hover {
-    background: #ffed4e;
-    transform: translateY(-50%) scale(1.1);
-}
-
-/* Mobile Responsive */
-@media (max-width: 768px) {
-    .navbar-container {
-        padding: 0 15px;
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+    .adopter-navbar {
+        background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        position: sticky;
+        top: 0;
+        z-index: 1000;
+        border-bottom: 3px solid #3498db;
     }
 
-    .mobile-menu-toggle {
+    .navbar-container {
+        max-width: 1200px;
+        margin: 0 auto;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 0 20px;
+        height: 70px;
+    }
+
+    .navbar-brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #fff;
+        text-decoration: none;
+        font-size: 1.5rem;
+        font-weight: 700;
+        transition: all 0.3s ease;
+    }
+
+    .navbar-brand:hover {
+        color: #3498db;
+        transform: scale(1.05);
+    }
+
+    .brand-icon {
+        background: linear-gradient(135deg, #3498db, #2980b9);
+        padding: 10px;
+        border-radius: 50%;
+        width: 45px;
+        height: 45px;
         display: flex;
         align-items: center;
         justify-content: center;
+        box-shadow: 0 4px 15px rgba(52, 152, 219, 0.3);
     }
 
     .navbar-nav {
-        display: none;
-        position: absolute;
-        top: 100%;
-        left: 0;
-        right: 0;
-        background: rgba(102, 126, 234, 0.98);
-        backdrop-filter: blur(15px);
-        flex-direction: column;
-        padding: 20px;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-        gap: 10px;
-    }
-
-    .navbar-nav.active {
         display: flex;
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        gap: 5px;
     }
 
     .nav-item {
-        width: 100%;
+        position: relative;
     }
 
     .nav-link {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 18px;
+        color: #ecf0f1;
+        text-decoration: none;
+        border-radius: 25px;
+        transition: all 0.3s ease;
+        font-weight: 500;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .nav-link::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
         width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+        transition: left 0.5s ease;
+    }
+
+    .nav-link:hover::before {
+        left: 100%;
+    }
+
+    .nav-link:hover,
+    .nav-link.active {
+        background: linear-gradient(135deg, #3498db, #2980b9);
+        color: #fff;
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(52, 152, 219, 0.3);
+    }
+
+    .nav-link.active {
+        background: linear-gradient(135deg, #e74c3c, #c0392b);
+        box-shadow: 0 5px 15px rgba(231, 76, 60, 0.3);
+    }
+
+    .nav-icon {
+        font-size: 1.1rem;
+        width: 20px;
+        text-align: center;
+    }
+
+    .navbar-user {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+    }
+
+    .user-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #ecf0f1;
+        position: relative;
+    }
+
+    .user-avatar {
+        width: 40px;
+        height: 40px;
+        background: linear-gradient(135deg, #e74c3c, #c0392b);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
         justify-content: center;
-        padding: 15px 20px;
-        border-radius: 12px;
+        color: #fff;
+        font-weight: bold;
+        font-size: 1.2rem;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(231, 76, 60, 0.2);
     }
 
-    .dropdown-menu {
-        position: static;
-        transform: none;
-        opacity: 1;
-        visibility: visible;
-        background: rgba(255, 255, 255, 0.1);
-        box-shadow: none;
-        margin: 10px 0;
-    }
-
-    .dropdown-menu::before {
-        display: none;
-    }
-
-    .dropdown-item {
-        color: white;
-        border-color: rgba(255, 255, 255, 0.1);
-    }
-
-    .dropdown-item:hover {
-        background: rgba(255, 255, 255, 0.2);
-        color: white;
+    .user-avatar:hover {
+        transform: scale(1.1);
+        box-shadow: 0 6px 20px rgba(231, 76, 60, 0.4);
     }
 
     .user-details {
-        display: none;
-    }
-
-    .navbar-search {
-        display: none;
-    }
-
-    .auth-buttons {
+        display: flex;
         flex-direction: column;
-        gap: 8px;
-        width: 100%;
+        align-items: flex-start;
     }
 
-    .btn-nav {
-        width: 100%;
+    .user-name {
+        font-weight: 600;
+        font-size: 0.95rem;
+    }
+
+    .user-role {
+        font-size: 0.8rem;
+        color: #bdc3c7;
+        background: rgba(52, 152, 219, 0.2);
+        padding: 2px 8px;
+        border-radius: 10px;
+    }
+
+    .dropdown {
+        position: relative;
+        display: inline-block;
+    }
+
+    .dropdown-content {
+        display: none;
+        position: absolute;
+        right: 0;
+        top: 100%;
+        margin-top: 10px;
+        background: #fff;
+        min-width: 200px;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        border-radius: 10px;
+        overflow: hidden;
+        z-index: 1001;
+        border: 1px solid #e9ecef;
+    }
+
+    .dropdown-content.show {
+        display: block;
+        animation: dropdownFadeIn 0.3s ease;
+    }
+
+    @keyframes dropdownFadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .dropdown-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px;
+        color: #495057;
+        text-decoration: none;
+        transition: all 0.3s ease;
+        border-bottom: 1px solid #f8f9fa;
+    }
+
+    .dropdown-item:last-child {
+        border-bottom: none;
+    }
+
+    .dropdown-item:hover {
+        background: #f8f9fa;
+        color: #3498db;
+        padding-left: 20px;
+    }
+
+    .dropdown-item.logout:hover {
+        background: #fff5f5;
+        color: #e74c3c;
+    }
+
+    .notification-badge {
+        position: absolute;
+        top: -5px;
+        right: -5px;
+        background: #e74c3c;
+        color: #fff;
+        font-size: 0.7rem;
+        padding: 2px 6px;
+        border-radius: 50%;
+        min-width: 18px;
+        height: 18px;
+        display: flex;
+        align-items: center;
         justify-content: center;
-    }
-}
-
-/* Animations */
-@keyframes pulse {
-
-    0%,
-    100% {
-        transform: scale(1);
+        animation: pulse 2s infinite;
     }
 
-    50% {
-        transform: scale(1.1);
-    }
-}
+    @keyframes pulse {
+        0% {
+            box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7);
+        }
 
-@keyframes bounce {
+        70% {
+            box-shadow: 0 0 0 10px rgba(231, 76, 60, 0);
+        }
 
-    0%,
-    100% {
-        transform: translateY(0);
-    }
-
-    50% {
-        transform: translateY(-5px);
-    }
-}
-
-@keyframes fadeInDown {
-    from {
-        opacity: 0;
-        transform: translateY(-30px);
+        100% {
+            box-shadow: 0 0 0 0 rgba(231, 76, 60, 0);
+        }
     }
 
-    to {
-        opacity: 1;
-        transform: translateY(0);
+    .mobile-menu-toggle {
+        display: none;
+        background: none;
+        border: none;
+        color: #fff;
+        font-size: 1.5rem;
+        cursor: pointer;
+        padding: 5px;
+        border-radius: 5px;
+        transition: all 0.3s ease;
     }
-}
 
-.navbar {
-    animation: fadeInDown 0.6s ease-out;
-}
+    .mobile-menu-toggle:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
 
-/* Scroll Progress Bar */
-.scroll-progress {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    height: 3px;
-    background: linear-gradient(90deg, #ffd700, #ffed4e);
-    transition: width 0.1s ease;
-    z-index: 1003;
-}
-</style>
+    /* Profile Modal Styles */
+    .profile-modal {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 2000;
+        backdrop-filter: blur(5px);
+    }
 
-<nav class="navbar" id="navbar">
-    <div class="navbar-container">
-        <!-- Brand/Logo -->
-        <a href="<?php echo BASE_URL; ?>index.php" class="navbar-brand">
-            <i class="fas fa-paw brand-icon"></i>
-            <span>Pet Care Guide</span>
-        </a>
+    .profile-modal.show {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: modalFadeIn 0.3s ease;
+    }
 
-        <!-- Navigation Menu -->
-        <ul class="navbar-nav" id="navbarNav">
-            <!-- Home -->
-            <li class="nav-item">
-                <a href="<?php echo BASE_URL; ?>index.php"
-                    class="nav-link <?php echo ($current_page == 'index.php') ? 'active' : ''; ?>">
-                    <i class="fas fa-home nav-icon"></i>
-                    <span>Home</span>
-                </a>
-            </li>
+    @keyframes modalFadeIn {
+        from {
+            opacity: 0;
+        }
 
-            <!-- About -->
-            <li class="nav-item">
-                <a href="<?php echo BASE_URL; ?>about.php"
-                    class="nav-link <?php echo ($current_page == 'about.php') ? 'active' : ''; ?>">
-                    <i class="fas fa-info-circle nav-icon"></i>
-                    <span>About</span>
-                </a>
-            </li>
+        to {
+            opacity: 1;
+        }
+    }
 
-            <!-- Browse Pets Dropdown -->
-            <li class="nav-item dropdown">
-                <a href="<?php echo BASE_URL; ?>adopter/browsePets.php"
-                    class="nav-link <?php echo ($current_page == 'browsePets.php' || $current_dir == 'adopter') ? 'active' : ''; ?>">
-                    <i class="fas fa-search nav-icon"></i>
-                    <span>Find Pets</span>
-                    <i class="fas fa-chevron-down" style="font-size: 0.8rem; margin-left: 5px;"></i>
-                </a>
-                <div class="dropdown-menu">
-                    <a href="<?php echo BASE_URL; ?>adopter/browsePets.php" class="dropdown-item">
-                        <i class="fas fa-list"></i> All Pets
-                    </a>
-                    <a href="<?php echo BASE_URL; ?>adopter/browsePets.php?category=dog" class="dropdown-item">
-                        <i class="fas fa-dog"></i> Dogs
-                    </a>
-                    <a href="<?php echo BASE_URL; ?>adopter/browsePets.php?category=cat" class="dropdown-item">
-                        <i class="fas fa-cat"></i> Cats
-                    </a>
-                    <a href="<?php echo BASE_URL; ?>adopter/browsePets.php?category=bird" class="dropdown-item">
-                        <i class="fas fa-dove"></i> Birds
-                    </a>
-                    <a href="<?php echo BASE_URL; ?>adopter/browsePets.php?category=other" class="dropdown-item">
-                        <i class="fas fa-paw"></i> Other Pets
-                    </a>
+    .profile-modal-content {
+        background: #fff;
+        border-radius: 15px;
+        padding: 30px;
+        max-width: 500px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+        position: relative;
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+        animation: modalSlideIn 0.3s ease;
+    }
+
+    @keyframes modalSlideIn {
+        from {
+            transform: translateY(-50px);
+            opacity: 0;
+        }
+
+        to {
+            transform: translateY(0);
+            opacity: 1;
+        }
+    }
+
+    .profile-modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 25px;
+        padding-bottom: 15px;
+        border-bottom: 2px solid #f8f9fa;
+    }
+
+    .profile-modal-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #2c3e50;
+        margin: 0;
+    }
+
+    .close-modal {
+        background: none;
+        border: none;
+        font-size: 1.5rem;
+        color: #95a5a6;
+        cursor: pointer;
+        padding: 5px;
+        border-radius: 50%;
+        transition: all 0.3s ease;
+    }
+
+    .close-modal:hover {
+        color: #e74c3c;
+        background: #f8f9fa;
+    }
+
+    .profile-form-group {
+        margin-bottom: 20px;
+    }
+
+    .profile-form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 600;
+        color: #2c3e50;
+    }
+
+    .profile-form-group input {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #e9ecef;
+        border-radius: 8px;
+        font-size: 1rem;
+        transition: border-color 0.3s ease;
+    }
+
+    .profile-form-group input:focus {
+        outline: none;
+        border-color: #3498db;
+    }
+
+    .profile-form-group input:disabled {
+        background: #f8f9fa;
+        cursor: not-allowed;
+    }
+
+    .profile-actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 25px;
+        padding-top: 20px;
+        border-top: 2px solid #f8f9fa;
+    }
+
+    .btn-profile {
+        padding: 12px 20px;
+        border: none;
+        border-radius: 8px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        flex: 1;
+    }
+
+    .btn-save {
+        background: linear-gradient(135deg, #27ae60, #2ecc71);
+        color: #fff;
+    }
+
+    .btn-save:hover {
+        background: linear-gradient(135deg, #2ecc71, #27ae60);
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(46, 204, 113, 0.3);
+    }
+
+    .btn-cancel {
+        background: linear-gradient(135deg, #95a5a6, #7f8c8d);
+        color: #fff;
+    }
+
+    .btn-cancel:hover {
+        background: linear-gradient(135deg, #7f8c8d, #95a5a6);
+        transform: translateY(-2px);
+        box-shadow: 0 5px 15px rgba(127, 140, 141, 0.3);
+    }
+
+    /* Mobile Responsive */
+    @media (max-width: 768px) {
+        .navbar-container {
+            flex-wrap: wrap;
+            height: auto;
+            padding: 10px 15px;
+        }
+
+        .navbar-brand {
+            font-size: 1.3rem;
+        }
+
+        .brand-icon {
+            width: 35px;
+            height: 35px;
+            padding: 8px;
+        }
+
+        .mobile-menu-toggle {
+            display: block;
+            order: 3;
+        }
+
+        .navbar-nav {
+            display: none;
+            flex-direction: column;
+            width: 100%;
+            background: rgba(52, 73, 94, 0.95);
+            border-radius: 10px;
+            margin-top: 15px;
+            padding: 15px;
+            gap: 8px;
+            order: 4;
+        }
+
+        .navbar-nav.show {
+            display: flex;
+            animation: mobileMenuSlide 0.3s ease;
+        }
+
+        @keyframes mobileMenuSlide {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .nav-link {
+            padding: 12px 15px;
+            border-radius: 8px;
+            justify-content: flex-start;
+        }
+
+        .user-details {
+            display: none;
+        }
+
+        .dropdown-content {
+            right: -10px;
+        }
+
+        .profile-modal-content {
+            padding: 20px;
+            margin: 10px;
+        }
+
+        .profile-actions {
+            flex-direction: column;
+        }
+    }
+
+    @media (max-width: 480px) {
+        .navbar-container {
+            padding: 8px 10px;
+        }
+
+        .navbar-brand {
+            font-size: 1.1rem;
+        }
+
+        .brand-icon {
+            width: 30px;
+            height: 30px;
+            padding: 6px;
+        }
+
+        .nav-link {
+            font-size: 0.9rem;
+            padding: 10px 12px;
+        }
+
+        .user-avatar {
+            width: 35px;
+            height: 35px;
+            font-size: 1rem;
+        }
+    }
+
+    /* Smooth scrolling */
+    html {
+        scroll-behavior: smooth;
+    }
+
+    /* Loading animation for page transitions */
+    .page-loading {
+        position: fixed;
+        top: 70px;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, #3498db, #e74c3c, #3498db);
+        background-size: 200% 100%;
+        animation: loading 1s infinite;
+        z-index: 1002;
+        display: none;
+    }
+
+    @keyframes loading {
+        0% {
+            background-position: 200% 0;
+        }
+
+        100% {
+            background-position: -200% 0;
+        }
+    }
+    </style>
+</head>
+
+<body>
+    <nav class="adopter-navbar">
+        <div class="navbar-container">
+            <!-- Brand -->
+            <a href="<?php echo $base_path; ?>dashboard.php" class="navbar-brand">
+                <div class="brand-icon">
+                    <i class="fas fa-heart"></i>
                 </div>
-            </li>
-
-            <!-- Care Guides -->
-            <li class="nav-item">
-                <a href="<?php echo BASE_URL; ?>adopter/careGuides.php"
-                    class="nav-link <?php echo ($current_page == 'careGuides.php') ? 'active' : ''; ?>">
-                    <i class="fas fa-book nav-icon"></i>
-                    <span>Care Guides</span>
-                </a>
-            </li>
-
-            <!-- Contact -->
-            <li class="nav-item">
-                <a href="<?php echo BASE_URL; ?>contact.php"
-                    class="nav-link <?php echo ($current_page == 'contact.php') ? 'active' : ''; ?>">
-                    <i class="fas fa-envelope nav-icon"></i>
-                    <span>Contact</span>
-                </a>
-            </li>
-
-            <!-- User-specific Navigation -->
-            <?php if ($is_logged_in): ?>
-            <?php if ($user_type === 'admin'): ?>
-            <li class="nav-item">
-                <a href="<?php echo BASE_URL; ?>admin/dashboard.php"
-                    class="nav-link <?php echo ($current_dir == 'admin') ? 'active' : ''; ?>">
-                    <i class="fas fa-shield-alt nav-icon"></i>
-                    <span>Admin</span>
-                    <?php 
-                        // Example: Get pending items count
-                        try {
-                            $db = getDB();
-                            $pending_count = $db->query("SELECT COUNT(*) FROM adoption_applications WHERE application_status = 'pending'")->fetchColumn();
-                            if ($pending_count > 0): 
-                        ?>
-                    <span class="notification-badge"><?php echo $pending_count; ?></span>
-                    <?php endif; } catch (Exception $e) {} ?>
-                </a>
-            </li>
-            <?php elseif ($user_type === 'shelter'): ?>
-            <li class="nav-item dropdown">
-                <a href="<?php echo BASE_URL; ?>shelter/dashboard.php"
-                    class="nav-link <?php echo ($current_dir == 'shelter') ? 'active' : ''; ?>">
-                    <i class="fas fa-home nav-icon"></i>
-                    <span>My Shelter</span>
-                    <i class="fas fa-chevron-down" style="font-size: 0.8rem; margin-left: 5px;"></i>
-                </a>
-                <div class="dropdown-menu">
-                    <a href="<?php echo BASE_URL; ?>shelter/dashboard.php" class="dropdown-item">
-                        <i class="fas fa-tachometer-alt"></i> Dashboard
-                    </a>
-                    <a href="<?php echo BASE_URL; ?>shelter/addPet.php" class="dropdown-item">
-                        <i class="fas fa-plus"></i> Add Pet
-                    </a>
-                    <a href="<?php echo BASE_URL; ?>shelter/viewPets.php" class="dropdown-item">
-                        <i class="fas fa-list"></i> My Pets
-                    </a>
-                    <a href="<?php echo BASE_URL; ?>shelter/adoptionRequests.php" class="dropdown-item">
-                        <i class="fas fa-heart"></i> Applications
-                    </a>
-                </div>
-            </li>
-            <?php else: ?>
-            <li class="nav-item dropdown">
-                <a href="<?php echo BASE_URL; ?>adopter/dashboard.php"
-                    class="nav-link <?php echo ($current_dir == 'adopter' && $current_page == 'dashboard.php') ? 'active' : ''; ?>">
-                    <i class="fas fa-heart nav-icon"></i>
-                    <span>My Account</span>
-                    <i class="fas fa-chevron-down" style="font-size: 0.8rem; margin-left: 5px;"></i>
-                </a>
-                <div class="dropdown-menu">
-                    <a href="<?php echo BASE_URL; ?>adopter/dashboard.php" class="dropdown-item">
-                        <i class="fas fa-tachometer-alt"></i> Dashboard
-                    </a>
-                    <a href="<?php echo BASE_URL; ?>adopter/myAdoptions.php" class="dropdown-item">
-                        <i class="fas fa-heart"></i> My Adoptions
-                    </a>
-                    <a href="<?php echo BASE_URL; ?>adopter/favorites.php" class="dropdown-item">
-                        <i class="fas fa-star"></i> Favorites
-                    </a>
-                </div>
-            </li>
-            <?php endif; ?>
-            <?php endif; ?>
-        </ul>
-
-        <!-- Search Bar (Optional) -->
-        <div class="navbar-search" style="display: none;">
-            <input type="text" class="search-input" placeholder="Search pets..." id="navbarSearch">
-            <button type="button" class="search-btn" onclick="performSearch()">
-                <i class="fas fa-search"></i>
-            </button>
-        </div>
-
-        <!-- User Menu / Auth Buttons -->
-        <div class="user-menu">
-            <?php if ($is_logged_in): ?>
-            <div class="user-info">
-                <div class="user-avatar">
-                    <?php echo strtoupper(substr(($_SESSION['first_name'] ?? 'U'), 0, 1)); ?>
-                </div>
-                <div class="user-details">
-                    <span class="user-name">
-                        <?php echo htmlspecialchars(trim($user_name)); ?>
-                    </span>
-                    <span class="user-role">
-                        <?php echo htmlspecialchars($user_type); ?>
-                    </span>
-                </div>
-            </div>
-            <a href="<?php echo BASE_URL; ?>auth/logout.php" class="btn-nav btn-logout"
-                onclick="return confirmLogout()">
-                <i class="fas fa-sign-out-alt"></i>
-                <span>Logout</span>
+                <span>PetCare</span>
             </a>
-            <?php else: ?>
-            <div class="auth-buttons">
-                <a href="<?php echo BASE_URL; ?>auth/login.php" class="btn-nav btn-login">
-                    <i class="fas fa-sign-in-alt"></i>
-                    <span>Login</span>
-                </a>
-                <a href="<?php echo BASE_URL; ?>auth/register.php" class="btn-nav btn-register">
-                    <i class="fas fa-user-plus"></i>
-                    <span>Register</span>
-                </a>
+
+            <!-- Navigation Links -->
+            <ul class="navbar-nav" id="navbarNav">
+                <li class="nav-item">
+                    <a href="<?php echo $base_path; ?>dashboard.php"
+                        class="nav-link <?php echo isActive('dashboard', $current_page); ?>">
+                        <i class="nav-icon fas fa-tachometer-alt"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="<?php echo $base_path; ?>browsePets.php"
+                        class="nav-link <?php echo isActive('browsePets', $current_page); ?>">
+                        <i class="nav-icon fas fa-search"></i>
+                        <span>Browse Pets</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="<?php echo $base_path; ?>myAdoptions.php"
+                        class="nav-link <?php echo isActive('myAdoptions', $current_page); ?>">
+                        <i class="nav-icon fas fa-heart"></i>
+                        <span>My Adoptions</span>
+                        <?php
+                        // Example: Check for adoption updates
+                        $has_updates = false; // Replace with actual logic
+                        if ($has_updates): ?>
+                        <span class="notification-badge">!</span>
+                        <?php endif; ?>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a href="<?php echo $base_path; ?>careGuides.php"
+                        class="nav-link <?php echo isActive('careGuides', $current_page); ?>">
+                        <i class="nav-icon fas fa-book-open"></i>
+                        <span>Care Guides</span>
+                    </a>
+                </li>
+            </ul>
+
+            <!-- User Info -->
+            <div class="navbar-user">
+                <div class="dropdown">
+                    <div class="user-info" onclick="toggleDropdown()">
+                        <div class="user-avatar">
+                            <?php echo strtoupper(substr($user_name, 0, 1)); ?>
+                        </div>
+                        <div class="user-details">
+                            <div class="user-name"><?php echo htmlspecialchars($user_name); ?></div>
+                            <div class="user-role">Adopter</div>
+                        </div>
+                        <i class="fas fa-chevron-down"
+                            style="font-size: 0.8rem; margin-left: 5px; transition: transform 0.3s ease;"
+                            id="dropdownArrow"></i>
+                    </div>
+
+                    <div class="dropdown-content" id="userDropdown">
+                        <a href="#" class="dropdown-item" onclick="viewProfile()">
+                            <i class="fas fa-user"></i>
+                            <span>My Profile</span>
+                        </a>
+                        <a href="<?php echo $base_path; ?>myAdoptions.php" class="dropdown-item">
+                            <i class="fas fa-heart"></i>
+                            <span>My Adoptions</span>
+                        </a>
+                        <a href="#" class="dropdown-item" onclick="viewSettings()">
+                            <i class="fas fa-cog"></i>
+                            <span>Settings</span>
+                        </a>
+                        <a href="#" class="dropdown-item" onclick="viewNotifications()">
+                            <i class="fas fa-bell"></i>
+                            <span>Notifications</span>
+                        </a>
+                        <hr style="margin: 5px 0; border: none; border-top: 1px solid #e9ecef;">
+                        <a href="<?php echo $auth_path; ?>logout.php" class="dropdown-item logout"
+                            onclick="return confirmLogout()">
+                            <i class="fas fa-sign-out-alt"></i>
+                            <span>Logout</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Mobile Menu Toggle -->
+                <button class="mobile-menu-toggle" onclick="toggleMobileMenu()">
+                    <i class="fas fa-bars" id="mobileMenuIcon"></i>
+                </button>
             </div>
-            <?php endif; ?>
         </div>
 
-        <!-- Mobile Menu Toggle -->
-        <button class="mobile-menu-toggle" id="mobileMenuToggle">
-            <i class="fas fa-bars"></i>
-        </button>
+        <!-- Loading Bar -->
+        <div class="page-loading" id="pageLoading"></div>
+    </nav>
+
+    <!-- Profile Modal -->
+    <div class="profile-modal" id="profileModal">
+        <div class="profile-modal-content">
+            <div class="profile-modal-header">
+                <h2 class="profile-modal-title">My Profile</h2>
+                <button class="close-modal" onclick="closeProfile()">&times;</button>
+            </div>
+
+            <form id="profileForm" onsubmit="return saveProfile(event)">
+                <div class="profile-form-group">
+                    <label for="profileUsername">Username</label>
+                    <input type="text" id="profileUsername"
+                        value="<?php echo htmlspecialchars($_SESSION['username'] ?? ''); ?>" disabled>
+                </div>
+
+                <div class="profile-form-group">
+                    <label for="profileEmail">Email</label>
+                    <input type="email" id="profileEmail" value="<?php echo htmlspecialchars($user_email); ?>" required>
+                </div>
+
+                <div class="profile-form-group">
+                    <label for="profileFirstName">First Name</label>
+                    <input type="text" id="profileFirstName"
+                        value="<?php echo htmlspecialchars($_SESSION['first_name'] ?? ''); ?>" required>
+                </div>
+
+                <div class="profile-form-group">
+                    <label for="profileLastName">Last Name</label>
+                    <input type="text" id="profileLastName"
+                        value="<?php echo htmlspecialchars($_SESSION['last_name'] ?? ''); ?>" required>
+                </div>
+
+                <div class="profile-form-group">
+                    <label for="profilePhone">Phone</label>
+                    <input type="tel" id="profilePhone"
+                        value="<?php echo htmlspecialchars($_SESSION['phone'] ?? ''); ?>">
+                </div>
+
+                <div class="profile-form-group">
+                    <label for="profileAddress">Address</label>
+                    <input type="text" id="profileAddress"
+                        value="<?php echo htmlspecialchars($_SESSION['address'] ?? ''); ?>">
+                </div>
+
+                <div class="profile-actions">
+                    <button type="submit" class="btn-profile btn-save">Save Changes</button>
+                    <button type="button" class="btn-profile btn-cancel" onclick="closeProfile()">Cancel</button>
+                </div>
+            </form>
+        </div>
     </div>
 
-    <!-- Scroll Progress Bar -->
-    <div class="scroll-progress" id="scrollProgress"></div>
-</nav>
+    <script>
+    // Dropdown functionality
+    function toggleDropdown() {
+        const dropdown = document.getElementById('userDropdown');
+        const arrow = document.getElementById('dropdownArrow');
 
-<script>
-// Navbar JavaScript Functionality
-document.addEventListener('DOMContentLoaded', function() {
-    initializeNavbar();
-    setupScrollEffects();
-    setupMobileMenu();
-    setupSearch();
-});
+        dropdown.classList.toggle('show');
 
-function initializeNavbar() {
-    console.log('Navbar initialized successfully');
-
-    // Add smooth hover effects
-    const navLinks = document.querySelectorAll('.nav-link');
-    navLinks.forEach(link => {
-        link.addEventListener('mouseenter', function() {
-            this.style.transform = 'translateY(-2px)';
-        });
-
-        link.addEventListener('mouseleave', function() {
-            if (!this.classList.contains('active')) {
-                this.style.transform = 'translateY(0)';
-            }
-        });
-    });
-}
-
-function setupScrollEffects() {
-    const navbar = document.getElementById('navbar');
-    const scrollProgress = document.getElementById('scrollProgress');
-
-    window.addEventListener('scroll', function() {
-        // Navbar scroll effect
-        if (window.scrollY > 50) {
-            navbar.classList.add('scrolled');
+        if (dropdown.classList.contains('show')) {
+            arrow.style.transform = 'rotate(180deg)';
         } else {
-            navbar.classList.remove('scrolled');
+            arrow.style.transform = 'rotate(0deg)';
         }
+    }
 
-        // Progress bar
-        const windowHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-        const scrolled = (window.scrollY / windowHeight) * 100;
-        scrollProgress.style.width = Math.min(scrolled, 100) + '%';
+    // Mobile menu functionality
+    function toggleMobileMenu() {
+        const navbarNav = document.getElementById('navbarNav');
+        const icon = document.getElementById('mobileMenuIcon');
+
+        navbarNav.classList.toggle('show');
+
+        if (navbarNav.classList.contains('show')) {
+            icon.className = 'fas fa-times';
+        } else {
+            icon.className = 'fas fa-bars';
+        }
+    }
+
+    // Profile modal functionality
+    function viewProfile() {
+        const modal = document.getElementById('profileModal');
+        modal.classList.add('show');
+        document.body.style.overflow = 'hidden'; // Prevent background scrolling
+
+        // Close dropdown
+        document.getElementById('userDropdown').classList.remove('show');
+        document.getElementById('dropdownArrow').style.transform = 'rotate(0deg)';
+    }
+
+    function closeProfile() {
+        const modal = document.getElementById('profileModal');
+        modal.classList.remove('show');
+        document.body.style.overflow = 'auto'; // Restore scrolling
+    }
+
+    function saveProfile(event) {
+        event.preventDefault();
+
+        const formData = {
+            email: document.getElementById('profileEmail').value,
+            first_name: document.getElementById('profileFirstName').value,
+            last_name: document.getElementById('profileLastName').value,
+            phone: document.getElementById('profilePhone').value,
+            address: document.getElementById('profileAddress').value
+        };
+
+        // Show loading
+        const saveBtn = event.target.querySelector('.btn-save');
+        const originalText = saveBtn.textContent;
+        saveBtn.textContent = 'Saving...';
+        saveBtn.disabled = true;
+
+        // Send AJAX request to update profile
+        fetch('<?php echo ($current_dir === "adopter") ? "../" : ""; ?>api/update_profile.php', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(formData)
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    alert('Profile updated successfully!');
+                    // Update session data display
+                    document.querySelector('.user-name').textContent = formData.first_name;
+                    closeProfile();
+
+                    // Optionally reload the page to reflect changes
+                    // window.location.reload();
+                } else {
+                    alert('Error updating profile: ' + (data.message || 'Unknown error'));
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while updating your profile. Please try again.');
+            })
+            .finally(() => {
+                saveBtn.textContent = originalText;
+                saveBtn.disabled = false;
+            });
+
+        return false;
+    }
+
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(event) {
+        const dropdown = document.getElementById('userDropdown');
+        const userInfo = document.querySelector('.user-info');
+        const arrow = document.getElementById('dropdownArrow');
+
+        if (!userInfo.contains(event.target)) {
+            dropdown.classList.remove('show');
+            arrow.style.transform = 'rotate(0deg)';
+        }
     });
-}
 
-function setupMobileMenu() {
-    const mobileToggle = document.getElementById('mobileMenuToggle');
-    const navbarNav = document.getElementById('navbarNav');
+    // Close mobile menu when clicking outside
+    document.addEventListener('click', function(event) {
+        const navbarNav = document.getElementById('navbarNav');
+        const mobileToggle = document.querySelector('.mobile-menu-toggle');
+        const navbar = document.querySelector('.adopter-navbar');
 
-    if (mobileToggle && navbarNav) {
-        mobileToggle.addEventListener('click', function() {
-            navbarNav.classList.toggle('active');
-            mobileToggle.classList.toggle('active');
+        if (!navbar.contains(event.target)) {
+            navbarNav.classList.remove('show');
+            document.getElementById('mobileMenuIcon').className = 'fas fa-bars';
+        }
+    });
 
-            const icon = mobileToggle.querySelector('i');
-            if (navbarNav.classList.contains('active')) {
-                icon.classList.remove('fa-bars');
-                icon.classList.add('fa-times');
-            } else {
-                icon.classList.remove('fa-times');
-                icon.classList.add('fa-bars');
+    // Close profile modal when clicking outside
+    document.addEventListener('click', function(event) {
+        const modal = document.getElementById('profileModal');
+        const modalContent = document.querySelector('.profile-modal-content');
+
+        if (event.target === modal && !modalContent.contains(event.target)) {
+            closeProfile();
+        }
+    });
+
+    // Page loading animation
+    function showPageLoading() {
+        document.getElementById('pageLoading').style.display = 'block';
+    }
+
+    function hidePageLoading() {
+        document.getElementById('pageLoading').style.display = 'none';
+    }
+
+    // Add loading animation to navigation links
+    document.querySelectorAll('.nav-link').forEach(link => {
+        link.addEventListener('click', function(e) {
+            // Don't show loading for current page
+            if (!this.classList.contains('active')) {
+                showPageLoading();
+
+                // Hide loading after 2 seconds if page doesn't load
+                setTimeout(hidePageLoading, 2000);
             }
         });
+    });
 
-        // Close mobile menu when clicking outside
-        document.addEventListener('click', function(e) {
-            if (!navbar.contains(e.target)) {
-                navbarNav.classList.remove('active');
-                mobileToggle.classList.remove('active');
-                const icon = mobileToggle.querySelector('i');
-                icon.classList.remove('fa-times');
-                icon.classList.add('fa-bars');
+    // Hide loading when page loads
+    window.addEventListener('load', hidePageLoading);
+
+    // User action functions
+    function viewSettings() {
+        alert('Settings functionality to be implemented');
+    }
+
+    function viewNotifications() {
+        alert('Notifications functionality to be implemented');
+    }
+
+    function confirmLogout() {
+        return confirm('Are you sure you want to logout?');
+    }
+
+    // Add smooth scrolling to hash links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function(e) {
+            e.preventDefault();
+            const target = document.querySelector(this.getAttribute('href'));
+            if (target) {
+                target.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                });
             }
         });
-    }
-}
+    });
 
-function setupSearch() {
-    const searchInput = document.getElementById('navbarSearch');
-    if (!searchInput) return;
+    // Responsive navigation adjustments
+    window.addEventListener('resize', function() {
+        const navbarNav = document.getElementById('navbarNav');
+        const mobileMenuIcon = document.getElementById('mobileMenuIcon');
 
-    searchInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            performSearch();
+        if (window.innerWidth > 768) {
+            navbarNav.classList.remove('show');
+            mobileMenuIcon.className = 'fas fa-bars';
         }
     });
-}
 
-function performSearch() {
-    const searchInput = document.getElementById('navbarSearch');
-    if (!searchInput) return;
-
-    const query = searchInput.value.trim();
-    if (query) {
-        window.location.href = `<?php echo BASE_URL; ?>adopter/browsePets.php?search=${encodeURIComponent(query)}`;
-    }
-}
-
-function confirmLogout() {
-    return confirm('Are you sure you want to logout?');
-}
-
-// Add keyboard navigation
-document.addEventListener('keydown', function(e) {
-    // Alt + H for Home
-    if (e.altKey && e.key === 'h') {
-        e.preventDefault();
-        window.location.href = '<?php echo BASE_URL; ?>index.php';
-    }
-
-    // Alt + A for About
-    if (e.altKey && e.key === 'a') {
-        e.preventDefault();
-        window.location.href = '<?php echo BASE_URL; ?>about.php';
-    }
-
-    // Alt + P for Pets
-    if (e.altKey && e.key === 'p') {
-        e.preventDefault();
-        window.location.href = '<?php echo BASE_URL; ?>adopter/browsePets.php';
-    }
-
-    // Escape to close mobile menu
-    if (e.key === 'Escape') {
-        const navbarNav = document.getElementById('navbarNav');
-        const mobileToggle = document.getElementById('mobileMenuToggle');
-        if (navbarNav && navbarNav.classList.contains('active')) {
-            navbarNav.classList.remove('active');
-            mobileToggle.classList.remove('active');
-            const icon = mobileToggle.querySelector('i');
-            icon.classList.remove('fa-times');
-            icon.classList.add('fa-bars');
-        }
-    }
-});
-
-// Auto-hide mobile menu on window resize
-window.addEventListener('resize', function() {
-    if (window.innerWidth > 768) {
-        const navbarNav = document.getElementById('navbarNav');
-        const mobileToggle = document.getElementById('mobileMenuToggle');
-        if (navbarNav && navbarNav.classList.contains('active')) {
-            navbarNav.classList.remove('active');
-            mobileToggle.classList.remove('active');
-            const icon = mobileToggle.querySelector('i');
-            icon.classList.remove('fa-times');
-            icon.classList.add('fa-bars');
-        }
-    }
-});
-
-// Add loading states to navigation links
-document.querySelectorAll('.nav-link, .btn-nav').forEach(link => {
-    link.addEventListener('click', function(e) {
-        // Don't add loading to dropdown toggles or external links
-        if (this.querySelector('.fa-chevron-down') ||
-            this.getAttribute('href').startsWith('http') ||
-            this.getAttribute('onclick')) {
-            return;
-        }
-
-        const icon = this.querySelector('i');
-        if (icon && !icon.classList.contains('fa-spin')) {
-            const originalClasses = icon.className;
-            icon.className = 'fas fa-spinner fa-spin';
-
-            // Restore original icon after navigation
-            setTimeout(() => {
-                icon.className = originalClasses;
-            }, 2000);
+    // Add keyboard navigation support
+    document.addEventListener('keydown', function(e) {
+        // Escape key closes dropdowns, mobile menu, and modals
+        if (e.key === 'Escape') {
+            document.getElementById('userDropdown').classList.remove('show');
+            document.getElementById('dropdownArrow').style.transform = 'rotate(0deg)';
+            document.getElementById('navbarNav').classList.remove('show');
+            document.getElementById('mobileMenuIcon').className = 'fas fa-bars';
+            closeProfile();
         }
     });
-});
 
-console.log('Navbar features loaded:');
-console.log('- Responsive mobile menu');
-console.log('- Scroll effects and progress bar');
-console.log('- Keyboard shortcuts (Alt+H, Alt+A, Alt+P)');
-console.log('- Dynamic user authentication');
-console.log('- Dropdown menus with hover effects');
-</script>
+    // Add focus management for accessibility
+    document.querySelectorAll('.nav-link, .dropdown-item').forEach(element => {
+        element.addEventListener('focus', function() {
+            this.style.outline = '2px solid #3498db';
+            this.style.outlineOffset = '2px';
+        });
+
+        element.addEventListener('blur', function() {
+            this.style.outline = 'none';
+        });
+    });
+    </script>
+</body>
+
+</html>
