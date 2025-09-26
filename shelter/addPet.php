@@ -856,52 +856,10 @@ if (isset($_SESSION['user_id'])) {
 </head>
 
 <body>
-    <!-- Navbar -->
-    <nav class="navbar">
-        <div class="navbar-container">
-            <a href="<?php echo $BASE_URL; ?>shelter/dashboard.php" class="navbar-brand">
-                <i class="fas fa-home"></i>
-                PetCare Shelter
-            </a>
 
-            <ul class="navbar-nav">
-                <li><a href="<?php echo $BASE_URL; ?>shelter/dashboard.php" class="nav-link">
-                        <i class="fas fa-tachometer-alt"></i> Dashboard
-                    </a></li>
-                <li><a href="<?php echo $BASE_URL; ?>shelter/addPet.php" class="nav-link">
-                        <i class="fas fa-plus-circle"></i> Add Pet
-                    </a></li>
-                <li><a href="<?php echo $BASE_URL; ?>shelter/viewPets.php" class="nav-link">
-                        <i class="fas fa-list"></i> My Pets
-                    </a></li>
-                <li><a href="<?php echo $BASE_URL; ?>shelter/adoptionRequests.php" class="nav-link">
-                        <i class="fas fa-heart"></i> Adoption Requests
-                    </a></li>
-                <li><a href="<?php echo $BASE_URL; ?>shelter/vaccinationTracker.php" class="nav-link">
-                        <i class="fas fa-syringe"></i> Vaccinations
-                    </a></li>
+    <!-- Include Shelter Navbar -->
+    <?php include_once __DIR__ . '/../common/navbar_shelter.php'; ?>
 
-                <li class="dropdown">
-                    <a href="#" class="nav-link">
-                        <i class="fas fa-user-circle"></i>
-                        <?php echo htmlspecialchars($current_user['first_name'] ?? 'User'); ?>
-                        <i class="fas fa-chevron-down"></i>
-                    </a>
-                    <div class="dropdown-menu">
-                        <a href="<?php echo $BASE_URL; ?>shelter/profile.php" class="dropdown-item">
-                            <i class="fas fa-user"></i> My Profile
-                        </a>
-                        <a href="<?php echo $BASE_URL; ?>shelter/settings.php" class="dropdown-item">
-                            <i class="fas fa-cog"></i> Settings
-                        </a>
-                        <a href="<?php echo $BASE_URL; ?>auth/logout.php" class="dropdown-item">
-                            <i class="fas fa-sign-out-alt"></i> Logout
-                        </a>
-                    </div>
-                </li>
-            </ul>
-        </div>
-    </nav>
 
     <div class="container">
         <!-- Page Header -->

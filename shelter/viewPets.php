@@ -26,7 +26,9 @@ $page_title = 'My Pets - Shelter Dashboard';
 $pets = [];
 $shelter_info = null;
 $categories = [];
-$current_user = null;
+$breeds = [];
+$total_pets = 0;
+$total_pages = 1;
 $stats = [
     'total_pets' => 0,
     'available_pets' => 0,
@@ -44,7 +46,7 @@ $page = max(1, intval($_GET['page'] ?? 1));
 $per_page = 12;
 $offset = ($page - 1) * $per_page;
 
-// Handle AJAX requests for pet actions
+// Handle AJAX requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest') {
     header('Content-Type: application/json');
     
@@ -56,45 +58,84 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
             // Get shelter info
             $stmt = $db->prepare("SELECT shelter_id FROM shelters WHERE user_id = ?");
             $stmt->execute([$user_id]);
-            $shelter_info = $stmt->fetch(PDO::FETCH_ASSOC);
+            $shelter_data = $stmt->fetch(PDO::FETCH_ASSOC);
             
-            if (!$shelter_info) {
+            if (!$shelter_data) {
                 echo json_encode(['success' => false, 'message' => 'Shelter not found']);
                 exit();
             }
             
             switch ($_POST['action']) {
-                case 'update_status':
+                case 'get_pet_details':
                     $pet_id = intval($_POST['pet_id'] ?? 0);
-                    $new_status = $_POST['new_status'] ?? '';
                     
-                    if ($pet_id > 0 && in_array($new_status, ['available', 'pending', 'adopted'])) {
+                    if ($pet_id > 0) {
+                        $stmt = $db->prepare("
+                            SELECT p.*, pc.category_name, pb.breed_name 
+                            FROM pets p
+                            LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
+                            LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
+                            WHERE p.pet_id = ? AND p.shelter_id = ?
+                        ");
+                        $stmt->execute([$pet_id, $shelter_data['shelter_id']]);
+                        $pet = $stmt->fetch(PDO::FETCH_ASSOC);
+                        
+                        if ($pet) {
+                            echo json_encode(['success' => true, 'pet' => $pet]);
+                        } else {
+                            echo json_encode(['success' => false, 'message' => 'Pet not found']);
+                        }
+                    } else {
+                        echo json_encode(['success' => false, 'message' => 'Invalid pet ID']);
+                    }
+                    break;
+                
+                case 'update_pet':
+                    $pet_id = intval($_POST['pet_id'] ?? 0);
+                    $pet_name = trim($_POST['pet_name'] ?? '');
+                    $category_id = intval($_POST['category_id'] ?? 0);
+                    $breed_id = intval($_POST['breed_id'] ?? 0) ?: null;
+                    $age = intval($_POST['age'] ?? 0);
+                    $gender = $_POST['gender'] ?? '';
+                    $size = $_POST['size'] ?? '';
+                    $description = trim($_POST['description'] ?? '');
+                    $health_status = trim($_POST['health_status'] ?? '');
+                    $adoption_fee = floatval($_POST['adoption_fee'] ?? 0);
+                    $status = $_POST['status'] ?? 'available';
+                    
+                    if ($pet_id > 0 && !empty($pet_name) && $category_id > 0 && $age >= 0 && in_array($gender, ['male', 'female']) && in_array($status, ['available', 'pending', 'adopted'])) {
                         // Verify pet belongs to this shelter
                         $stmt = $db->prepare("SELECT pet_id FROM pets WHERE pet_id = ? AND shelter_id = ?");
-                        $stmt->execute([$pet_id, $shelter_info['shelter_id']]);
+                        $stmt->execute([$pet_id, $shelter_data['shelter_id']]);
                         
                         if ($stmt->fetch()) {
-                            $stmt = $db->prepare("UPDATE pets SET status = ? WHERE pet_id = ?");
-                            if ($stmt->execute([$new_status, $pet_id])) {
-                                echo json_encode(['success' => true, 'message' => 'Pet status updated successfully']);
+                            $stmt = $db->prepare("
+                                UPDATE pets SET 
+                                    pet_name = ?, category_id = ?, breed_id = ?, age = ?, gender = ?, 
+                                    size = ?, description = ?, health_status = ?, adoption_fee = ?, status = ?
+                                WHERE pet_id = ?
+                            ");
+                            
+                            if ($stmt->execute([$pet_name, $category_id, $breed_id, $age, $gender, $size, $description, $health_status, $adoption_fee, $status, $pet_id])) {
+                                echo json_encode(['success' => true, 'message' => 'Pet updated successfully']);
                             } else {
-                                echo json_encode(['success' => false, 'message' => 'Failed to update pet status']);
+                                echo json_encode(['success' => false, 'message' => 'Failed to update pet']);
                             }
                         } else {
                             echo json_encode(['success' => false, 'message' => 'Pet not found or unauthorized']);
                         }
                     } else {
-                        echo json_encode(['success' => false, 'message' => 'Invalid parameters']);
+                        echo json_encode(['success' => false, 'message' => 'Please fill in all required fields correctly']);
                     }
                     break;
-                    
+                
                 case 'delete_pet':
                     $pet_id = intval($_POST['pet_id'] ?? 0);
                     
                     if ($pet_id > 0) {
                         // Verify pet belongs to this shelter
                         $stmt = $db->prepare("SELECT pet_id, primary_image FROM pets WHERE pet_id = ? AND shelter_id = ?");
-                        $stmt->execute([$pet_id, $shelter_info['shelter_id']]);
+                        $stmt->execute([$pet_id, $shelter_data['shelter_id']]);
                         $pet = $stmt->fetch(PDO::FETCH_ASSOC);
                         
                         if ($pet) {
@@ -109,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
                                     }
                                 }
                                 
-                                // Delete the pet (foreign key constraints will handle related records)
+                                // Delete the pet (cascade will handle related records)
                                 $stmt = $db->prepare("DELETE FROM pets WHERE pet_id = ?");
                                 $stmt->execute([$pet_id]);
                                 
@@ -124,6 +165,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
                         }
                     } else {
                         echo json_encode(['success' => false, 'message' => 'Invalid pet ID']);
+                    }
+                    break;
+                
+                case 'get_breeds':
+                    $category_id = intval($_POST['category_id'] ?? 0);
+                    
+                    if ($category_id > 0) {
+                        $stmt = $db->prepare("SELECT breed_id, breed_name FROM pet_breeds WHERE category_id = ? ORDER BY breed_name");
+                        $stmt->execute([$category_id]);
+                        $breeds = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                        
+                        echo json_encode(['success' => true, 'breeds' => $breeds]);
+                    } else {
+                        echo json_encode(['success' => false, 'message' => 'Invalid category ID']);
                     }
                     break;
                     
@@ -145,11 +200,6 @@ try {
     $db = getDB();
     
     if ($db) {
-        // Get current user info
-        $stmt = $db->prepare("SELECT u.*, s.shelter_name FROM users u LEFT JOIN shelters s ON u.user_id = s.user_id WHERE u.user_id = ?");
-        $stmt->execute([$user_id]);
-        $current_user = $stmt->fetch(PDO::FETCH_ASSOC);
-        
         // Get shelter information
         $stmt = $db->prepare("SELECT * FROM shelters WHERE user_id = ?");
         $stmt->execute([$user_id]);
@@ -166,22 +216,31 @@ try {
         $stmt->execute();
         $categories = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         
+        // Get all breeds for edit form
+        $stmt = $db->prepare("SELECT * FROM pet_breeds ORDER BY category_id, breed_name");
+        $stmt->execute();
+        $breeds = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        
         // Get statistics
         $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE shelter_id = ?");
         $stmt->execute([$shelter_info['shelter_id']]);
-        $stats['total_pets'] = $stmt->fetchColumn() ?: 0;
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stats['total_pets'] = $result ? (int)$result['count'] : 0;
         
         $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE shelter_id = ? AND status = 'available'");
         $stmt->execute([$shelter_info['shelter_id']]);
-        $stats['available_pets'] = $stmt->fetchColumn() ?: 0;
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stats['available_pets'] = $result ? (int)$result['count'] : 0;
         
         $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE shelter_id = ? AND status = 'pending'");
         $stmt->execute([$shelter_info['shelter_id']]);
-        $stats['pending_pets'] = $stmt->fetchColumn() ?: 0;
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stats['pending_pets'] = $result ? (int)$result['count'] : 0;
         
         $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE shelter_id = ? AND status = 'adopted'");
         $stmt->execute([$shelter_info['shelter_id']]);
-        $stats['adopted_pets'] = $stmt->fetchColumn() ?: 0;
+        $result = $stmt->fetch(PDO::FETCH_ASSOC);
+        $stats['adopted_pets'] = $result ? (int)$result['count'] : 0;
         
         // Build the pets query
         $where_conditions = ["p.shelter_id = ?"];
@@ -199,8 +258,9 @@ try {
         
         if (!empty($search_query)) {
             $where_conditions[] = "(p.pet_name LIKE ? OR p.description LIKE ?)";
-            $params[] = "%$search_query%";
-            $params[] = "%$search_query%";
+            $search_term = "%$search_query%";
+            $params[] = $search_term;
+            $params[] = $search_term;
         }
         
         $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
@@ -211,16 +271,12 @@ try {
         $sort_order = strtoupper($sort_order) === 'ASC' ? 'ASC' : 'DESC';
         
         // Get total count for pagination
-        $count_query = "
-            SELECT COUNT(*) as total 
-            FROM pets p
-            LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
-            $where_clause
-        ";
+        $count_query = "SELECT COUNT(*) as total FROM pets p $where_clause";
         $stmt = $db->prepare($count_query);
         $stmt->execute($params);
-        $total_pets = $stmt->fetch()['total'] ?? 0;
-        $total_pages = ceil($total_pets / $per_page);
+        $count_result = $stmt->fetch(PDO::FETCH_ASSOC);
+        $total_pets = $count_result ? (int)$count_result['total'] : 0;
+        $total_pages = max(1, ceil($total_pets / $per_page));
         
         // Get pets with pagination
         $pets_query = "
@@ -238,6 +294,7 @@ try {
         $stmt = $db->prepare($pets_query);
         $stmt->execute($params);
         $pets = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        
     } else {
         throw new Exception("Database connection failed");
     }
@@ -288,6 +345,7 @@ try {
         align-items: center;
         flex-wrap: wrap;
         gap: 20px;
+        box-shadow: 0 10px 30px rgba(40, 167, 69, 0.3);
     }
 
     .page-header h1 {
@@ -320,6 +378,13 @@ try {
         align-items: center;
         gap: 8px;
         cursor: pointer;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        text-decoration: none;
     }
 
     .btn-primary {
@@ -329,8 +394,6 @@ try {
 
     .btn-primary:hover {
         background: #ffed4e;
-        transform: translateY(-2px);
-        text-decoration: none;
         color: #20c997;
     }
 
@@ -342,7 +405,6 @@ try {
 
     .btn-secondary:hover {
         background: rgba(255, 255, 255, 0.3);
-        text-decoration: none;
         color: white;
     }
 
@@ -373,6 +435,15 @@ try {
         background: #e0a800;
     }
 
+    .btn-info {
+        background: #17a2b8;
+        color: white;
+    }
+
+    .btn-info:hover {
+        background: #138496;
+    }
+
     .btn-sm {
         padding: 6px 12px;
         font-size: 0.8rem;
@@ -395,16 +466,7 @@ try {
         position: relative;
         overflow: hidden;
         cursor: pointer;
-    }
-
-    .stat-card::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 4px;
-        background: var(--color);
+        border-top: 4px solid var(--color);
     }
 
     .stat-card:hover {
@@ -463,7 +525,7 @@ try {
         opacity: 0.9;
     }
 
-    /* Filters and Controls */
+    /* Controls Section */
     .controls-section {
         background: white;
         border-radius: 15px;
@@ -541,7 +603,7 @@ try {
     /* Pets Grid */
     .pets-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
         gap: 25px;
         margin-bottom: 30px;
     }
@@ -577,6 +639,11 @@ try {
         width: 100%;
         height: 100%;
         object-fit: cover;
+        transition: transform 0.3s ease;
+    }
+
+    .pet-image:hover img {
+        transform: scale(1.05);
     }
 
     .pet-status {
@@ -628,7 +695,7 @@ try {
         color: #666;
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: 3px;
     }
 
     .pet-fee {
@@ -644,6 +711,7 @@ try {
         margin-bottom: 15px;
         display: -webkit-box;
         -webkit-line-clamp: 3;
+        line-clamp: 3;
         -webkit-box-orient: vertical;
         overflow: hidden;
     }
@@ -655,24 +723,23 @@ try {
         margin-bottom: 15px;
         font-size: 0.85rem;
         color: #666;
+        flex-wrap: wrap;
+        gap: 10px;
     }
 
     .pet-actions {
-        display: flex;
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
         gap: 8px;
-        flex-wrap: wrap;
-    }
-
-    .pet-actions .btn {
-        flex: 1;
-        justify-content: center;
-        min-width: 80px;
     }
 
     /* Empty State */
     .empty-state {
         text-align: center;
         padding: 60px 30px;
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
         color: #666;
     }
 
@@ -707,6 +774,10 @@ try {
         display: flex;
         gap: 5px;
         align-items: center;
+        background: white;
+        padding: 10px 20px;
+        border-radius: 15px;
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
     }
 
     .pagination a,
@@ -748,16 +819,33 @@ try {
         width: 100%;
         height: 100%;
         background: rgba(0, 0, 0, 0.5);
+        overflow-y: auto;
+        padding: 20px;
     }
 
     .modal-content {
         background: white;
-        margin: 5% auto;
+        margin: 0 auto;
         padding: 0;
         border-radius: 15px;
         width: 90%;
-        max-width: 500px;
+        max-width: 800px;
         position: relative;
+        max-height: 95vh;
+        overflow: hidden;
+        animation: modalSlideIn 0.3s ease-out;
+    }
+
+    @keyframes modalSlideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-50px) scale(0.9);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
     }
 
     .modal-header {
@@ -782,14 +870,24 @@ try {
         cursor: pointer;
         color: white;
         opacity: 0.8;
+        padding: 5px;
+        border-radius: 50%;
+        width: 35px;
+        height: 35px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
     }
 
     .modal-close:hover {
         opacity: 1;
+        background: rgba(255, 255, 255, 0.1);
     }
 
     .modal-body {
         padding: 25px;
+        max-height: 70vh;
+        overflow-y: auto;
     }
 
     .modal-actions {
@@ -800,6 +898,58 @@ try {
         gap: 10px;
         background: #f8f9fa;
         border-radius: 0 0 15px 15px;
+    }
+
+    /* Form Styles */
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+        margin-bottom: 20px;
+    }
+
+    .form-group {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+
+    .form-group label {
+        font-weight: 600;
+        color: #2c3e50;
+        font-size: 0.9rem;
+    }
+
+    .form-group.required label::after {
+        content: ' *';
+        color: #dc3545;
+    }
+
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        padding: 10px 12px;
+        border: 2px solid #e1e8ed;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        transition: border-color 0.3s ease;
+        font-family: inherit;
+    }
+
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+        outline: none;
+        border-color: #28a745;
+    }
+
+    .form-group textarea {
+        resize: vertical;
+        min-height: 80px;
+    }
+
+    .form-group.full-width {
+        grid-column: 1 / -1;
     }
 
     /* Messages */
@@ -843,21 +993,25 @@ try {
         pointer-events: none;
     }
 
-    /* Animations */
-    @keyframes fadeIn {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
+    .spinner {
+        border: 2px solid #f3f3f3;
+        border-top: 2px solid #28a745;
+        border-radius: 50%;
+        width: 20px;
+        height: 20px;
+        animation: spin 1s linear infinite;
+        display: inline-block;
+        margin-left: 10px;
     }
 
-    .fade-in {
-        animation: fadeIn 0.6s ease-out;
+    @keyframes spin {
+        0% {
+            transform: rotate(0deg);
+        }
+
+        100% {
+            transform: rotate(360deg);
+        }
     }
 
     /* Responsive Design */
@@ -876,6 +1030,11 @@ try {
         .page-header {
             flex-direction: column;
             text-align: center;
+            padding: 25px;
+        }
+
+        .page-header h1 {
+            font-size: 1.8rem;
         }
 
         .stats-grid {
@@ -890,6 +1049,23 @@ try {
         .pets-grid {
             grid-template-columns: 1fr;
         }
+
+        .form-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .pet-actions {
+            grid-template-columns: 1fr;
+            gap: 5px;
+        }
+
+        .modal-content {
+            width: 95%;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
     }
 
     @media (max-width: 480px) {
@@ -897,8 +1073,14 @@ try {
             grid-template-columns: 1fr;
         }
 
-        .pet-actions {
-            flex-direction: column;
+        .stat-number {
+            font-size: 2rem;
+        }
+
+        .stat-icon {
+            width: 50px;
+            height: 50px;
+            font-size: 1.2rem;
         }
     }
     </style>
@@ -910,10 +1092,11 @@ try {
 
     <div class="container">
         <!-- Page Header -->
-        <div class="page-header fade-in">
+        <div class="page-header">
             <div>
                 <h1><i class="fas fa-list"></i> My Pets</h1>
-                <p>Manage and view all pets in your shelter</p>
+                <p>Manage and view all pets in
+                    <?php echo htmlspecialchars($shelter_info['shelter_name'] ?? 'your shelter'); ?></p>
             </div>
             <div class="header-actions">
                 <a href="<?php echo $BASE_URL; ?>shelter/addPet.php" class="btn btn-primary">
@@ -934,7 +1117,7 @@ try {
         <?php endif; ?>
 
         <!-- Statistics Cards -->
-        <div class="stats-grid fade-in">
+        <div class="stats-grid">
             <div class="stat-card total" onclick="filterByStatus('')">
                 <div class="stat-content">
                     <div class="stat-info">
@@ -946,7 +1129,6 @@ try {
                     </div>
                 </div>
             </div>
-
             <div class="stat-card available" onclick="filterByStatus('available')">
                 <div class="stat-content">
                     <div class="stat-info">
@@ -954,11 +1136,10 @@ try {
                         <div class="stat-number"><?php echo $stats['available_pets']; ?></div>
                     </div>
                     <div class="stat-icon">
-                        <i class="fas fa-check-circle"></i>
+                        <i class="fas fa-heart"></i>
                     </div>
                 </div>
             </div>
-
             <div class="stat-card pending" onclick="filterByStatus('pending')">
                 <div class="stat-content">
                     <div class="stat-info">
@@ -966,11 +1147,10 @@ try {
                         <div class="stat-number"><?php echo $stats['pending_pets']; ?></div>
                     </div>
                     <div class="stat-icon">
-                        <i class="fas fa-hourglass-half"></i>
+                        <i class="fas fa-clock"></i>
                     </div>
                 </div>
             </div>
-
             <div class="stat-card adopted" onclick="filterByStatus('adopted')">
                 <div class="stat-content">
                     <div class="stat-info">
@@ -985,17 +1165,22 @@ try {
         </div>
 
         <!-- Controls Section -->
-        <div class="controls-section fade-in">
+        <div class="controls-section">
             <div class="controls-header">
                 <h2 class="controls-title">Filter & Search</h2>
+                <div class="header-actions">
+                    <button onclick="resetFilters()" class="btn btn-secondary btn-sm">
+                        <i class="fas fa-undo"></i> Reset
+                    </button>
+                </div>
             </div>
 
-            <form method="GET" action="" id="filtersForm">
+            <form id="filterForm" method="GET" action="">
                 <div class="controls-grid">
                     <div class="control-group">
-                        <label>Status</label>
-                        <select name="status" onchange="document.getElementById('filtersForm').submit()">
-                            <option value="">All Statuses</option>
+                        <label for="status">Status</label>
+                        <select name="status" id="status" onchange="document.getElementById('filterForm').submit()">
+                            <option value="">All Status</option>
                             <option value="available" <?php echo $filter_status === 'available' ? 'selected' : ''; ?>>
                                 Available</option>
                             <option value="pending" <?php echo $filter_status === 'pending' ? 'selected' : ''; ?>>
@@ -1006,8 +1191,8 @@ try {
                     </div>
 
                     <div class="control-group">
-                        <label>Category</label>
-                        <select name="category" onchange="document.getElementById('filtersForm').submit()">
+                        <label for="category">Category</label>
+                        <select name="category" id="category" onchange="document.getElementById('filterForm').submit()">
                             <option value="">All Categories</option>
                             <?php foreach ($categories as $category): ?>
                             <option value="<?php echo $category['category_id']; ?>"
@@ -1018,24 +1203,31 @@ try {
                         </select>
                     </div>
 
+                    <div class="control-group search-group">
+                        <label for="search">Search</label>
+                        <input type="text" name="search" id="search" placeholder="Search by name or description..."
+                            value="<?php echo htmlspecialchars($search_query); ?>">
+                        <i class="fas fa-search"></i>
+                    </div>
+
                     <div class="control-group">
-                        <label>Sort By</label>
-                        <select name="sort" onchange="document.getElementById('filtersForm').submit()">
+                        <label for="sort">Sort By</label>
+                        <select name="sort" id="sort" onchange="document.getElementById('filterForm').submit()">
                             <option value="created_at" <?php echo $sort_by === 'created_at' ? 'selected' : ''; ?>>Date
                                 Added</option>
                             <option value="pet_name" <?php echo $sort_by === 'pet_name' ? 'selected' : ''; ?>>Name
                             </option>
                             <option value="age" <?php echo $sort_by === 'age' ? 'selected' : ''; ?>>Age</option>
                             <option value="adoption_fee" <?php echo $sort_by === 'adoption_fee' ? 'selected' : ''; ?>>
-                                Adoption Fee</option>
+                                Fee</option>
                             <option value="status" <?php echo $sort_by === 'status' ? 'selected' : ''; ?>>Status
                             </option>
                         </select>
                     </div>
 
                     <div class="control-group">
-                        <label>Order</label>
-                        <select name="order" onchange="document.getElementById('filtersForm').submit()">
+                        <label for="order">Order</label>
+                        <select name="order" id="order" onchange="document.getElementById('filterForm').submit()">
                             <option value="DESC" <?php echo $sort_order === 'DESC' ? 'selected' : ''; ?>>Descending
                             </option>
                             <option value="ASC" <?php echo $sort_order === 'ASC' ? 'selected' : ''; ?>>Ascending
@@ -1043,50 +1235,39 @@ try {
                         </select>
                     </div>
 
-                    <div class="control-group search-group">
-                        <label>Search</label>
-                        <input type="text" name="search" value="<?php echo htmlspecialchars($search_query); ?>"
-                            placeholder="Search pets..." onkeypress="handleSearchKeypress(event)">
-                        <i class="fas fa-search"></i>
-                    </div>
-
                     <div class="control-group">
-                        <a href="<?php echo $BASE_URL; ?>shelter/viewPets.php" class="btn btn-secondary"
-                            style="width: 100%; margin-top: 5px; text-align: center;">
-                            <i class="fas fa-times"></i> Clear
-                        </a>
+                        <label>&nbsp;</label>
+                        <button type="submit" class="btn btn-success">
+                            <i class="fas fa-filter"></i> Apply Filter
+                        </button>
                     </div>
                 </div>
+
+                <!-- Hidden fields for pagination -->
+                <input type="hidden" name="page" value="<?php echo $page; ?>">
             </form>
         </div>
 
+        <!-- Pets Grid -->
         <?php if (empty($pets)): ?>
-        <!-- Empty State -->
-        <div class="empty-state fade-in">
+        <div class="empty-state">
             <div class="empty-icon">
                 <i class="fas fa-paw"></i>
             </div>
             <h3 class="empty-title">No Pets Found</h3>
             <p class="empty-text">
-                <?php if (!empty($filter_status) || !empty($filter_category) || !empty($search_query)): ?>
+                <?php if (!empty($search_query) || !empty($filter_status) || !empty($filter_category)): ?>
                 No pets match your current filters. Try adjusting your search criteria.
                 <?php else: ?>
-                You haven't added any pets yet. Start by adding your first pet!
+                You haven't added any pets yet. Start by adding your first pet to the system.
                 <?php endif; ?>
             </p>
-            <?php if (empty($filter_status) && empty($filter_category) && empty($search_query)): ?>
-            <a href="<?php echo $BASE_URL; ?>shelter/addPet.php" class="btn btn-primary">
+            <a href="<?php echo $BASE_URL; ?>shelter/addPet.php" class="btn btn-success">
                 <i class="fas fa-plus-circle"></i> Add Your First Pet
             </a>
-            <?php else: ?>
-            <a href="<?php echo $BASE_URL; ?>shelter/viewPets.php" class="btn btn-secondary">
-                <i class="fas fa-eye"></i> View All Pets
-            </a>
-            <?php endif; ?>
         </div>
         <?php else: ?>
-        <!-- Pets Grid -->
-        <div class="pets-grid fade-in">
+        <div class="pets-grid">
             <?php foreach ($pets as $pet): ?>
             <div class="pet-card" data-pet-id="<?php echo $pet['pet_id']; ?>">
                 <div class="pet-image">
@@ -1096,10 +1277,9 @@ try {
                     <?php else: ?>
                     <i class="fas fa-paw"></i>
                     <?php endif; ?>
-                </div>
-
-                <div class="pet-status status-<?php echo $pet['status']; ?>">
-                    <?php echo ucfirst($pet['status']); ?>
+                    <span class="pet-status status-<?php echo $pet['status']; ?>">
+                        <?php echo ucfirst($pet['status']); ?>
+                    </span>
                 </div>
 
                 <div class="pet-content">
@@ -1107,60 +1287,46 @@ try {
                         <div class="pet-info">
                             <h3><?php echo htmlspecialchars($pet['pet_name']); ?></h3>
                             <div class="pet-meta">
-                                <span><i class="fas fa-tag"></i>
-                                    <?php echo htmlspecialchars($pet['category_name'] ?? 'Unknown'); ?></span>
-                                <?php if (!empty($pet['breed_name'])): ?>
-                                <span><i class="fas fa-dna"></i>
-                                    <?php echo htmlspecialchars($pet['breed_name']); ?></span>
-                                <?php endif; ?>
-                                <span><i class="fas fa-birthday-cake"></i> <?php echo $pet['age']; ?> years old</span>
-                                <span><i class="fas fa-venus-mars"></i> <?php echo ucfirst($pet['gender']); ?></span>
+                                <span><?php echo htmlspecialchars($pet['category_name']); ?><?php echo $pet['breed_name'] ? ' - ' . htmlspecialchars($pet['breed_name']) : ''; ?></span>
+                                <span><?php echo $pet['age']; ?> <?php echo $pet['age'] == 1 ? 'year' : 'years'; ?> old
+                                    • <?php echo ucfirst($pet['gender']); ?></span>
                                 <?php if (!empty($pet['size'])): ?>
-                                <span><i class="fas fa-ruler"></i> <?php echo ucfirst($pet['size']); ?></span>
+                                <span>Size: <?php echo ucfirst($pet['size']); ?></span>
                                 <?php endif; ?>
                             </div>
                         </div>
                         <div class="pet-fee">
-                            <?php if ($pet['adoption_fee'] > 0): ?>
                             $<?php echo number_format($pet['adoption_fee'], 2); ?>
-                            <?php else: ?>
-                            <span style="color: #28a745;">Free</span>
-                            <?php endif; ?>
                         </div>
                     </div>
 
+                    <?php if (!empty($pet['description'])): ?>
                     <div class="pet-description">
                         <?php echo htmlspecialchars($pet['description']); ?>
                     </div>
+                    <?php endif; ?>
 
                     <div class="pet-stats">
-                        <span>
-                            <i class="fas fa-calendar-plus"></i>
-                            Added <?php echo date('M j, Y', strtotime($pet['created_at'])); ?>
-                        </span>
-                        <span>
-                            <i class="fas fa-heartbeat"></i>
-                            <?php echo htmlspecialchars($pet['health_status'] ?? 'Good'); ?>
-                        </span>
+                        <span><i class="fas fa-calendar-plus"></i> Added
+                            <?php echo date('M j, Y', strtotime($pet['created_at'])); ?></span>
+                        <?php if (!empty($pet['health_status'])): ?>
+                        <span><i class="fas fa-heart-pulse"></i>
+                            <?php echo htmlspecialchars($pet['health_status']); ?></span>
+                        <?php endif; ?>
                     </div>
 
                     <div class="pet-actions">
-                        <a href="<?php echo $BASE_URL; ?>shelter/editPet.php?id=<?php echo $pet['pet_id']; ?>"
-                            class="btn btn-warning btn-sm">
-                            <i class="fas fa-edit"></i> Edit
-                        </a>
-
-                        <?php if ($pet['status'] !== 'adopted'): ?>
-                        <button
-                            onclick="showStatusModal(<?php echo $pet['pet_id']; ?>, '<?php echo $pet['status']; ?>')"
-                            class="btn btn-success btn-sm">
-                            <i class="fas fa-sync"></i> Status
+                        <button onclick="viewPetDetails(<?php echo $pet['pet_id']; ?>)" class="btn btn-info btn-sm"
+                            title="View Details">
+                            <i class="fas fa-eye"></i> View
                         </button>
-                        <?php endif; ?>
-
+                        <button onclick="editPet(<?php echo $pet['pet_id']; ?>)" class="btn btn-warning btn-sm"
+                            title="Edit Pet">
+                            <i class="fas fa-edit"></i> Edit
+                        </button>
                         <button
-                            onclick="confirmDeletePet(<?php echo $pet['pet_id']; ?>, '<?php echo htmlspecialchars($pet['pet_name'], ENT_QUOTES); ?>')"
-                            class="btn btn-danger btn-sm">
+                            onclick="deletePet(<?php echo $pet['pet_id']; ?>, '<?php echo htmlspecialchars($pet['pet_name']); ?>')"
+                            class="btn btn-danger btn-sm" title="Delete Pet">
                             <i class="fas fa-trash"></i> Delete
                         </button>
                     </div>
@@ -1173,50 +1339,73 @@ try {
         <?php if ($total_pages > 1): ?>
         <div class="pagination-section">
             <div class="pagination">
-                <?php if ($page > 1): ?>
-                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page - 1])); ?>">
-                    <i class="fas fa-chevron-left"></i> Previous
+                <?php
+                        // Previous page
+                        if ($page > 1):
+                            $prev_params = $_GET;
+                            $prev_params['page'] = $page - 1;
+                        ?>
+                <a href="?<?php echo http_build_query($prev_params); ?>" title="Previous Page">
+                    <i class="fas fa-chevron-left"></i>
                 </a>
                 <?php else: ?>
                 <span class="disabled">
-                    <i class="fas fa-chevron-left"></i> Previous
+                    <i class="fas fa-chevron-left"></i>
                 </span>
                 <?php endif; ?>
 
                 <?php
-                        $start = max(1, $page - 2);
-                        $end = min($total_pages, $page + 2);
+                        // Page numbers
+                        $start_page = max(1, $page - 2);
+                        $end_page = min($total_pages, $page + 2);
                         
-                        if ($start > 1): ?>
-                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => 1])); ?>">1</a>
-                <?php if ($start > 2): ?>
+                        if ($start_page > 1):
+                            $first_params = $_GET;
+                            $first_params['page'] = 1;
+                        ?>
+                <a href="?<?php echo http_build_query($first_params); ?>">1</a>
+                <?php if ($start_page > 2): ?>
                 <span>...</span>
                 <?php endif; ?>
                 <?php endif; ?>
 
-                <?php for ($i = $start; $i <= $end; $i++): ?>
+                <?php for ($i = $start_page; $i <= $end_page; $i++): ?>
                 <?php if ($i == $page): ?>
                 <span class="current"><?php echo $i; ?></span>
                 <?php else: ?>
-                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $i])); ?>"><?php echo $i; ?></a>
+                <?php
+                                $page_params = $_GET;
+                                $page_params['page'] = $i;
+                                ?>
+                <a href="?<?php echo http_build_query($page_params); ?>"><?php echo $i; ?></a>
                 <?php endif; ?>
                 <?php endfor; ?>
 
-                <?php if ($end < $total_pages): ?>
-                <?php if ($end < $total_pages - 1): ?>
+                <?php
+                        if ($end_page < $total_pages):
+                            if ($end_page < $total_pages - 1):
+                        ?>
                 <span>...</span>
                 <?php endif; ?>
-                <a
-                    href="?<?php echo http_build_query(array_merge($_GET, ['page' => $total_pages])); ?>"><?php echo $total_pages; ?></a>
+                <?php
+                            $last_params = $_GET;
+                            $last_params['page'] = $total_pages;
+                            ?>
+                <a href="?<?php echo http_build_query($last_params); ?>"><?php echo $total_pages; ?></a>
                 <?php endif; ?>
 
-                <?php if ($page < $total_pages): ?>
-                <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>">
-                    Next <i class="fas fa-chevron-right"></i>
+                <?php
+                        // Next page
+                        if ($page < $total_pages):
+                            $next_params = $_GET;
+                            $next_params['page'] = $page + 1;
+                        ?>
+                <a href="?<?php echo http_build_query($next_params); ?>" title="Next Page">
+                    <i class="fas fa-chevron-right"></i>
                 </a>
                 <?php else: ?>
                 <span class="disabled">
-                    Next <i class="fas fa-chevron-right"></i>
+                    <i class="fas fa-chevron-right"></i>
                 </span>
                 <?php endif; ?>
             </div>
@@ -1225,159 +1414,358 @@ try {
         <?php endif; ?>
     </div>
 
-    <!-- Status Update Modal -->
-    <div id="statusModal" class="modal">
+    <!-- Pet Details Modal -->
+    <div id="petDetailsModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 class="modal-title">Update Pet Status</h3>
-                <button class="modal-close" onclick="closeModal('statusModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <p>Select the new status for this pet:</p>
-                <select id="newStatus"
-                    style="width: 100%; padding: 10px; border: 2px solid #e1e8ed; border-radius: 8px; margin: 15px 0;">
-                    <option value="available">Available for Adoption</option>
-                    <option value="pending">Pending Adoption</option>
-                    <option value="adopted">Adopted</option>
-                </select>
-                <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                    <p style="margin: 0; color: #666; font-size: 0.9rem;">
-                        <strong>Note:</strong> Changing status will affect the pet's visibility and adoption process.
-                    </p>
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="closeModal('statusModal')">Cancel</button>
-                <button class="btn btn-success" onclick="confirmStatusUpdate()">
-                    <i class="fas fa-save"></i> Update Status
+                <h3 class="modal-title">Pet Details</h3>
+                <button class="modal-close" onclick="closeModal('petDetailsModal')">
+                    <i class="fas fa-times"></i>
                 </button>
+            </div>
+            <div class="modal-body" id="petDetailsBody">
+                <div style="text-align: center; padding: 40px; color: #666;">
+                    <div class="spinner"></div>
+                    Loading pet details...
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- Delete Confirmation Modal -->
-    <div id="deleteModal" class="modal">
+    <!-- Edit Pet Modal -->
+    <div id="editPetModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 class="modal-title">Confirm Pet Deletion</h3>
-                <button class="modal-close" onclick="closeModal('deleteModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div style="text-align: center; margin-bottom: 20px;">
-                    <i class="fas fa-exclamation-triangle"
-                        style="font-size: 3rem; color: #dc3545; margin-bottom: 15px;"></i>
-                </div>
-                <p><strong>Are you sure you want to delete this pet?</strong></p>
-                <p id="deletePetName" style="color: #666; margin: 10px 0;"></p>
-                <div
-                    style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 8px; margin: 15px 0;">
-                    <p style="margin: 0; color: #856404;"><strong>⚠️ Warning:</strong></p>
-                    <ul style="margin: 10px 0 0 20px; color: #856404;">
-                        <li>This action cannot be undone</li>
-                        <li>All pet data will be permanently deleted</li>
-                        <li>All adoption applications will be removed</li>
-                        <li>All images and medical records will be deleted</li>
-                    </ul>
-                </div>
-            </div>
-            <div class="modal-actions">
-                <button class="btn btn-secondary" onclick="closeModal('deleteModal')">Cancel</button>
-                <button class="btn btn-danger" onclick="confirmDeletePetAction()">
-                    <i class="fas fa-trash"></i> Delete Pet
+                <h3 class="modal-title">Edit Pet</h3>
+                <button class="modal-close" onclick="closeModal('editPetModal')">
+                    <i class="fas fa-times"></i>
                 </button>
             </div>
+            <form id="editPetForm">
+                <div class="modal-body">
+                    <div class="form-grid">
+                        <div class="form-group required">
+                            <label for="edit_pet_name">Pet Name</label>
+                            <input type="text" id="edit_pet_name" name="pet_name" required>
+                        </div>
+
+                        <div class="form-group required">
+                            <label for="edit_category_id">Category</label>
+                            <select id="edit_category_id" name="category_id" required
+                                onchange="loadBreedsForEdit(this.value)">
+                                <option value="">Select Category</option>
+                                <?php foreach ($categories as $category): ?>
+                                <option value="<?php echo $category['category_id']; ?>">
+                                    <?php echo htmlspecialchars($category['category_name']); ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="edit_breed_id">Breed</label>
+                            <select id="edit_breed_id" name="breed_id">
+                                <option value="">Select Breed</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group required">
+                            <label for="edit_age">Age (years)</label>
+                            <input type="number" id="edit_age" name="age" min="0" max="30" required>
+                        </div>
+
+                        <div class="form-group required">
+                            <label for="edit_gender">Gender</label>
+                            <select id="edit_gender" name="gender" required>
+                                <option value="">Select Gender</option>
+                                <option value="male">Male</option>
+                                <option value="female">Female</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="edit_size">Size</label>
+                            <select id="edit_size" name="size">
+                                <option value="">Select Size</option>
+                                <option value="small">Small</option>
+                                <option value="medium">Medium</option>
+                                <option value="large">Large</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="edit_adoption_fee">Adoption Fee ($)</label>
+                            <input type="number" id="edit_adoption_fee" name="adoption_fee" min="0" step="0.01">
+                        </div>
+
+                        <div class="form-group required">
+                            <label for="edit_status">Status</label>
+                            <select id="edit_status" name="status" required>
+                                <option value="available">Available</option>
+                                <option value="pending">Pending</option>
+                                <option value="adopted">Adopted</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group full-width">
+                            <label for="edit_health_status">Health Status</label>
+                            <input type="text" id="edit_health_status" name="health_status"
+                                placeholder="e.g., Healthy, Vaccinated">
+                        </div>
+
+                        <div class="form-group full-width">
+                            <label for="edit_description">Description</label>
+                            <textarea id="edit_description" name="description" rows="4"
+                                placeholder="Tell us about this pet..."></textarea>
+                        </div>
+                    </div>
+                    <input type="hidden" id="edit_pet_id" name="pet_id">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" onclick="closeModal('editPetModal')" class="btn btn-secondary">
+                        <i class="fas fa-times"></i> Cancel
+                    </button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="fas fa-save"></i> Save Changes
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 
     <script>
-    // Global variables
-    let currentPetId = null;
-    let currentPetName = null;
+    // JavaScript functionality
+    let currentEditPetId = null;
+    let allBreeds = <?php echo json_encode($breeds); ?>;
 
-    // Initialize page
-    document.addEventListener('DOMContentLoaded', function() {
-        // Close modals when clicking outside
-        document.addEventListener('click', function(event) {
-            if (event.target.classList.contains('modal')) {
-                event.target.style.display = 'none';
+    // Utility functions
+    function showMessage(message, type = 'success') {
+        // Remove existing messages
+        const existingMessages = document.querySelectorAll('.message');
+        existingMessages.forEach(msg => msg.remove());
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${type}`;
+        messageDiv.innerHTML =
+            `<i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i> ${message}`;
+
+        document.body.appendChild(messageDiv);
+
+        setTimeout(() => {
+            if (messageDiv.parentNode) {
+                messageDiv.remove();
             }
-        });
-    });
+        }, 5000);
+    }
+
+    function openModal(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            modal.style.display = 'block';
+            document.body.style.overflow = 'hidden';
+        }
+    }
+
+    function closeModal(modalId) {
+        const modal = document.getElementById(modalId);
+        if (modal) {
+            modal.style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+    }
+
+    // Close modals when clicking outside
+    window.onclick = function(event) {
+        if (event.target.classList.contains('modal')) {
+            event.target.style.display = 'none';
+            document.body.style.overflow = 'auto';
+        }
+    }
 
     // Filter functions
     function filterByStatus(status) {
-        const url = new URL(window.location);
+        const currentUrl = new URL(window.location);
         if (status) {
-            url.searchParams.set('status', status);
+            currentUrl.searchParams.set('status', status);
         } else {
-            url.searchParams.delete('status');
+            currentUrl.searchParams.delete('status');
         }
-        url.searchParams.delete('page');
-        window.location.href = url.toString();
+        currentUrl.searchParams.delete('page'); // Reset to first page
+        window.location.href = currentUrl.toString();
     }
 
-    function handleSearchKeypress(event) {
-        if (event.key === 'Enter') {
-            document.getElementById('filtersForm').submit();
-        }
+    function resetFilters() {
+        const baseUrl = window.location.pathname;
+        window.location.href = baseUrl;
     }
 
-    // Show status update modal
-    function showStatusModal(petId, currentStatus) {
-        currentPetId = petId;
-        document.getElementById('newStatus').value = currentStatus;
-        document.getElementById('statusModal').style.display = 'block';
-    }
+    // Search functionality
+    let searchTimeout;
+    document.getElementById('search').addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => {
+            document.getElementById('filterForm').submit();
+        }, 1000); // Wait 1 second after user stops typing
+    });
 
-    // Confirm status update
-    function confirmStatusUpdate() {
-        const newStatus = document.getElementById('newStatus').value;
+    // Pet details functionality
+    function viewPetDetails(petId) {
+        openModal('petDetailsModal');
+        document.getElementById('petDetailsBody').innerHTML = `
+                <div style="text-align: center; padding: 40px; color: #666;">
+                    <div class="spinner"></div>
+                    Loading pet details...
+                </div>
+            `;
 
-        if (currentPetId && newStatus) {
-            performAjaxAction('update_status', {
-                pet_id: currentPetId,
-                new_status: newStatus
+        fetch(window.location.href, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: `action=get_pet_details&pet_id=${petId}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const pet = data.pet;
+                    document.getElementById('petDetailsBody').innerHTML = `
+                        <div class="pet-details">
+                            <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 25px; margin-bottom: 25px;">
+                                <div class="pet-image-large">
+                                    ${pet.primary_image ? 
+                                        `<img src="<?php echo $BASE_URL; ?>uploads/${pet.primary_image}" alt="${pet.pet_name}" style="width: 100%; height: 250px; object-fit: cover; border-radius: 10px;">` :
+                                        '<div style="width: 100%; height: 250px; background: #f8f9fa; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #999; font-size: 3rem;"><i class="fas fa-paw"></i></div>'
+                                    }
+                                </div>
+                                <div class="pet-info-detailed">
+                                    <h2 style="margin-bottom: 15px; color: #2c3e50;">${pet.pet_name}</h2>
+                                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                                        <div><strong>Category:</strong> ${pet.category_name || 'N/A'}</div>
+                                        <div><strong>Breed:</strong> ${pet.breed_name || 'Mixed/Unknown'}</div>
+                                        <div><strong>Age:</strong> ${pet.age} ${pet.age == 1 ? 'year' : 'years'} old</div>
+                                        <div><strong>Gender:</strong> ${pet.gender.charAt(0).toUpperCase() + pet.gender.slice(1)}</div>
+                                        <div><strong>Size:</strong> ${pet.size ? pet.size.charAt(0).toUpperCase() + pet.size.slice(1) : 'N/A'}</div>
+                                        <div><strong>Status:</strong> <span class="status-${pet.status}">${pet.status.charAt(0).toUpperCase() + pet.status.slice(1)}</span></div>
+                                        <div><strong>Adoption Fee:</strong> $${parseFloat(pet.adoption_fee || 0).toFixed(2)}</div>
+                                        <div><strong>Added:</strong> ${new Date(pet.created_at).toLocaleDateString()}</div>
+                                    </div>
+                                    ${pet.health_status ? `<div style="margin-bottom: 15px;"><strong>Health Status:</strong> ${pet.health_status}</div>` : ''}
+                                </div>
+                            </div>
+                            ${pet.description ? `<div><strong>Description:</strong><p style="margin-top: 10px; line-height: 1.6; color: #666;">${pet.description}</p></div>` : ''}
+                            <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #eee; display: flex; gap: 10px; justify-content: center;">
+                                <button onclick="editPet(${pet.pet_id})" class="btn btn-warning">
+                                    <i class="fas fa-edit"></i> Edit Pet
+                                </button>
+                                <button onclick="closeModal('petDetailsModal')" class="btn btn-secondary">
+                                    <i class="fas fa-times"></i> Close
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    document.getElementById('petDetailsBody').innerHTML = `
+                        <div style="text-align: center; padding: 40px; color: #666;">
+                            <i class="fas fa-exclamation-circle" style="font-size: 3rem; margin-bottom: 15px; color: #dc3545;"></i>
+                            <h3>Error Loading Pet Details</h3>
+                            <p>${data.message}</p>
+                        </div>
+                    `;
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('petDetailsBody').innerHTML = `
+                    <div style="text-align: center; padding: 40px; color: #666;">
+                        <i class="fas fa-exclamation-triangle" style="font-size: 3rem; margin-bottom: 15px; color: #ffc107;"></i>
+                        <h3>Connection Error</h3>
+                        <p>Failed to load pet details. Please try again.</p>
+                    </div>
+                `;
             });
-            closeModal('statusModal');
-        }
     }
 
-    // Show delete confirmation modal
-    function confirmDeletePet(petId, petName) {
-        currentPetId = petId;
-        currentPetName = petName;
-        document.getElementById('deletePetName').textContent = `Pet: ${petName}`;
-        document.getElementById('deleteModal').style.display = 'block';
-    }
+    // Edit pet functionality
+    function editPet(petId) {
+        currentEditPetId = petId;
+        openModal('editPetModal');
 
-    // Confirm delete pet action
-    function confirmDeletePetAction() {
-        if (currentPetId) {
-            performAjaxAction('delete_pet', {
-                pet_id: currentPetId
+        // Reset form
+        document.getElementById('editPetForm').reset();
+        document.getElementById('edit_pet_id').value = petId;
+
+        // Load pet data
+        fetch(window.location.href, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: `action=get_pet_details&pet_id=${petId}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const pet = data.pet;
+
+                    // Populate form fields
+                    document.getElementById('edit_pet_name').value = pet.pet_name || '';
+                    document.getElementById('edit_category_id').value = pet.category_id || '';
+                    document.getElementById('edit_age').value = pet.age || '';
+                    document.getElementById('edit_gender').value = pet.gender || '';
+                    document.getElementById('edit_size').value = pet.size || '';
+                    document.getElementById('edit_adoption_fee').value = pet.adoption_fee || '';
+                    document.getElementById('edit_status').value = pet.status || '';
+                    document.getElementById('edit_health_status').value = pet.health_status || '';
+                    document.getElementById('edit_description').value = pet.description || '';
+
+                    // Load breeds for the selected category
+                    if (pet.category_id) {
+                        loadBreedsForEdit(pet.category_id, pet.breed_id);
+                    }
+                } else {
+                    showMessage(data.message, 'error');
+                    closeModal('editPetModal');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showMessage('Failed to load pet data', 'error');
+                closeModal('editPetModal');
             });
-            closeModal('deleteModal');
+    }
+
+    function loadBreedsForEdit(categoryId, selectedBreedId = null) {
+        const breedSelect = document.getElementById('edit_breed_id');
+        breedSelect.innerHTML = '<option value="">Select Breed</option>';
+
+        if (categoryId) {
+            const categoryBreeds = allBreeds.filter(breed => breed.category_id == categoryId);
+            categoryBreeds.forEach(breed => {
+                const option = document.createElement('option');
+                option.value = breed.breed_id;
+                option.textContent = breed.breed_name;
+                if (selectedBreedId && breed.breed_id == selectedBreedId) {
+                    option.selected = true;
+                }
+                breedSelect.appendChild(option);
+            });
         }
     }
 
-    // Close modal
-    function closeModal(modalId) {
-        document.getElementById(modalId).style.display = 'none';
-        currentPetId = null;
-        currentPetName = null;
-    }
+    // Handle edit form submission
+    document.getElementById('editPetForm').addEventListener('submit', function(e) {
+        e.preventDefault();
 
-    // Perform AJAX action
-    function performAjaxAction(action, data) {
-        const formData = new FormData();
-        formData.append('action', action);
+        const formData = new FormData(this);
+        formData.append('action', 'update_pet');
 
-        for (const key in data) {
-            formData.append(key, data[key]);
-        }
-
-        // Show loading state
-        document.body.classList.add('loading');
+        const submitBtn = this.querySelector('button[type="submit"]');
+        const originalText = submitBtn.innerHTML;
+        submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        submitBtn.disabled = true;
 
         fetch(window.location.href, {
                 method: 'POST',
@@ -1388,88 +1776,100 @@ try {
             })
             .then(response => response.json())
             .then(data => {
-                document.body.classList.remove('loading');
-
                 if (data.success) {
                     showMessage(data.message, 'success');
-
-                    // Refresh page after successful action
+                    closeModal('editPetModal');
+                    // Refresh the page to show updated data
                     setTimeout(() => {
                         window.location.reload();
-                    }, 1500);
+                    }, 1000);
                 } else {
-                    showMessage(data.message || 'An error occurred', 'error');
+                    showMessage(data.message, 'error');
                 }
             })
             .catch(error => {
-                document.body.classList.remove('loading');
                 console.error('Error:', error);
-                showMessage('Network error occurred', 'error');
+                showMessage('Failed to update pet', 'error');
+            })
+            .finally(() => {
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
             });
-    }
-
-    // Show message notification
-    function showMessage(message, type) {
-        // Remove existing messages
-        const existingMessages = document.querySelectorAll('.message');
-        existingMessages.forEach(msg => msg.remove());
-
-        // Create new message
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${type}`;
-        messageDiv.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
-                    <span>${message}</span>
-                </div>
-            `;
-
-        document.body.appendChild(messageDiv);
-
-        // Auto remove after 5 seconds
-        setTimeout(() => {
-            if (messageDiv.parentNode) {
-                messageDiv.remove();
-            }
-        }, 5000);
-    }
-
-    // Keyboard shortcuts
-    document.addEventListener('keydown', function(event) {
-        // Escape key to close modals
-        if (event.key === 'Escape') {
-            const modals = document.querySelectorAll('.modal');
-            modals.forEach(modal => modal.style.display = 'none');
-            currentPetId = null;
-            currentPetName = null;
-        }
     });
 
-    // Auto-hide success messages
-    setTimeout(() => {
-        const successMessages = document.querySelectorAll('.message.success');
-        successMessages.forEach(message => {
-            message.style.opacity = '0';
-            setTimeout(() => {
-                if (message.parentNode) {
-                    message.remove();
-                }
-            }, 500);
-        });
-    }, 5000);
+    // Delete pet functionality
+    function deletePet(petId, petName) {
+        if (confirm(
+                `Are you sure you want to delete "${petName}"? This action cannot be undone and will also delete all related records (applications, adoptions, medical records, etc.).`
+            )) {
+            // Double confirmation for safety
+            if (confirm(`This will permanently delete ${petName} and ALL related data. Are you absolutely sure?`)) {
+                fetch(window.location.href, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-Requested-With': 'XMLHttpRequest'
+                        },
+                        body: `action=delete_pet&pet_id=${petId}`
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showMessage(data.message, 'success');
+                            // Remove the pet card from the display
+                            const petCard = document.querySelector(`[data-pet-id="${petId}"]`);
+                            if (petCard) {
+                                petCard.style.transition = 'all 0.3s ease';
+                                petCard.style.opacity = '0';
+                                petCard.style.transform = 'scale(0.8)';
+                                setTimeout(() => {
+                                    petCard.remove();
+                                    // Check if no pets left
+                                    if (document.querySelectorAll('.pet-card').length === 0) {
+                                        setTimeout(() => {
+                                            window.location.reload();
+                                        }, 1000);
+                                    }
+                                }, 300);
+                            }
+                        } else {
+                            showMessage(data.message, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        showMessage('Failed to delete pet', 'error');
+                    });
+            }
+        }
+    }
 
-    // Add hover effects to pet cards
+    // Initialize page
     document.addEventListener('DOMContentLoaded', function() {
-        const petCards = document.querySelectorAll('.pet-card');
-        petCards.forEach(card => {
-            card.addEventListener('mouseenter', function() {
-                this.style.transform = 'translateY(-8px)';
-            });
+        // Remove any existing error messages from session
+        <?php if (isset($_SESSION['error_message'])): ?>
+        showMessage('<?php echo addslashes($_SESSION['error_message']); ?>', 'error');
+        <?php unset($_SESSION['error_message']); ?>
+        <?php endif; ?>
 
-            card.addEventListener('mouseleave', function() {
-                this.style.transform = 'translateY(0px)';
+        <?php if (isset($_SESSION['success_message'])): ?>
+        showMessage('<?php echo addslashes($_SESSION['success_message']); ?>', 'success');
+        <?php unset($_SESSION['success_message']); ?>
+        <?php endif; ?>
+    });
+
+    // Keyboard shortcuts
+    document.addEventListener('keydown', function(e) {
+        // Escape key closes modals
+        if (e.key === 'Escape') {
+            const modals = document.querySelectorAll('.modal');
+            modals.forEach(modal => {
+                if (modal.style.display === 'block') {
+                    modal.style.display = 'none';
+                    document.body.style.overflow = 'auto';
+                }
             });
-        });
+        }
     });
     </script>
 </body>

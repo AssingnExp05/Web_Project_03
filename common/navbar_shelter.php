@@ -37,7 +37,7 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
                 <i class="fas fa-heart"></i>
                 <span>Adoption Requests</span>
                 <?php
-                // Show notification badge for pending requests (optional)
+                // Show notification badge for pending requests
                 try {
                     require_once __DIR__ . '/../config/db.php';
                     $db = getDB();
@@ -66,6 +66,11 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
                 class="nav-link <?php echo ($current_page === 'vaccinationTracker') ? 'active' : ''; ?>">
                 <i class="fas fa-syringe"></i>
                 <span>Vaccination Tracker</span>
+            </a>
+            <a href="<?php echo $BASE_URL; ?>shelter/addCareGuide.php"
+                class="nav-link <?php echo ($current_page === 'addCareGuide') ? 'active' : ''; ?>">
+                <i class="fas fa-book-open"></i>
+                <span>Add Care Guide</span>
             </a>
 
             <!-- User Info Section -->
@@ -165,7 +170,7 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
 .nav-link {
     color: white;
     text-decoration: none;
-    padding: 12px 20px;
+    padding: 12px 18px;
     border-radius: 25px;
     transition: all 0.3s ease;
     font-weight: 500;
@@ -173,7 +178,7 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
     align-items: center;
     gap: 8px;
     position: relative;
-    font-size: 0.95rem;
+    font-size: 0.9rem;
 }
 
 .nav-link:hover {
@@ -372,14 +377,14 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
 }
 
 /* Mobile Responsiveness */
-@media (max-width: 1024px) {
+@media (max-width: 1200px) {
     .nav-links {
-        gap: 4px;
+        gap: 6px;
     }
 
     .nav-link {
-        padding: 10px 15px;
-        font-size: 0.9rem;
+        padding: 10px 14px;
+        font-size: 0.85rem;
     }
 
     .nav-link span {
@@ -388,6 +393,17 @@ $current_page = basename($_SERVER['PHP_SELF'], '.php');
 
     .user-details {
         display: none;
+    }
+}
+
+@media (max-width: 1024px) {
+    .nav-links {
+        gap: 4px;
+    }
+
+    .nav-link {
+        padding: 10px 12px;
+        font-size: 0.9rem;
     }
 }
 

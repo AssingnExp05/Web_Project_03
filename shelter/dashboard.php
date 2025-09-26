@@ -659,38 +659,9 @@ try {
 </head>
 
 <body>
-    <!-- Inline Navigation Bar -->
-    <nav class="navbar">
-        <div class="nav-container">
-            <a href="<?php echo $BASE_URL; ?>index.php" class="logo">
-                <i class="fas fa-paw"></i>
-                Pet Care Guide
-            </a>
-            <div class="nav-links">
-                <a href="<?php echo $BASE_URL; ?>shelter/dashboard.php" class="nav-link active">
-                    <i class="fas fa-home"></i> Dashboard
-                </a>
-                <a href="<?php echo $BASE_URL; ?>shelter/addPet.php" class="nav-link">
-                    <i class="fas fa-plus-circle"></i> Add Pet
-                </a>
-                <a href="<?php echo $BASE_URL; ?>shelter/viewPets.php" class="nav-link">
-                    <i class="fas fa-list"></i> View Pets
-                </a>
-                <a href="<?php echo $BASE_URL; ?>shelter/adoptionRequests.php" class="nav-link">
-                    <i class="fas fa-heart"></i> Adoption Requests
-                </a>
-                <div class="user-info">
-                    <div class="user-avatar">
-                        <?php echo strtoupper(substr($user_first_name, 0, 1)); ?>
-                    </div>
-                    <span><?php echo htmlspecialchars($user_first_name); ?></span>
-                    <a href="<?php echo $BASE_URL; ?>auth/logout.php" class="nav-link">
-                        <i class="fas fa-sign-out-alt"></i> Logout
-                    </a>
-                </div>
-            </div>
-        </div>
-    </nav>
+    <!-- Include Shelter Navbar -->
+    <?php include_once __DIR__ . '/../common/navbar_shelter.php'; ?>
+
 
     <div class="container">
         <!-- Welcome Header -->
