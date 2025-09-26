@@ -24,6 +24,8 @@ $page_title = 'Manage Adoptions - Admin Dashboard';
 
 // Initialize variables
 $adoptions = [];
+$total_adoptions = 0;
+$total_pages = 1;
 $stats = [
     'total_adoptions' => 0,
     'pending_applications' => 0,
@@ -57,28 +59,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
                     $new_status = $_POST['status'] ?? '';
                     $admin_notes = $_POST['admin_notes'] ?? '';
                     
-                    if ($adoption_id > 0 && in_array($new_status, ['pending', 'approved', 'rejected', 'completed'])) {
+                    if ($adoption_id > 0 && in_array($new_status, ['pending', 'approved', 'rejected'])) {
                         $db->beginTransaction();
                         
                         try {
                             // Update adoption application
                             $stmt = $db->prepare("
                                 UPDATE adoption_applications 
-                                SET status = ?, admin_notes = ?, reviewed_by = ?, reviewed_at = NOW(), updated_at = NOW()
+                                SET application_status = ?, reviewed_by = ? 
                                 WHERE application_id = ?
                             ");
-                            $stmt->execute([$new_status, $admin_notes, $user_id, $adoption_id]);
+                            $stmt->execute([$new_status, $user_id, $adoption_id]);
                             
-                            // If approved, create adoption record
+                            // If approved, create adoption record and update pet status
                             if ($new_status === 'approved') {
                                 // Get application details
                                 $stmt = $db->prepare("
-                                    SELECT pet_id, adopter_id 
-                                    FROM adoption_applications 
-                                    WHERE application_id = ?
+                                    SELECT aa.pet_id, aa.adopter_id, aa.shelter_id, p.adoption_fee
+                                    FROM adoption_applications aa
+                                    JOIN pets p ON aa.pet_id = p.pet_id
+                                    WHERE aa.application_id = ?
                                 ");
                                 $stmt->execute([$adoption_id]);
-                                $app_details = $stmt->fetch();
+                                $app_details = $stmt->fetch(PDO::FETCH_ASSOC);
                                 
                                 if ($app_details) {
                                     // Check if adoption record already exists
@@ -91,19 +94,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
                                     if (!$stmt->fetch()) {
                                         // Create adoption record
                                         $stmt = $db->prepare("
-                                            INSERT INTO adoptions (application_id, pet_id, adopter_id, adoption_date, status, created_at)
-                                            VALUES (?, ?, ?, NOW(), 'active', NOW())
+                                            INSERT INTO adoptions (application_id, pet_id, adopter_id, shelter_id, adoption_date, adoption_fee_paid)
+                                            VALUES (?, ?, ?, ?, CURDATE(), ?)
                                         ");
-                                        $stmt->execute([$adoption_id, $app_details['pet_id'], $app_details['adopter_id']]);
+                                        $stmt->execute([
+                                            $adoption_id, 
+                                            $app_details['pet_id'], 
+                                            $app_details['adopter_id'],
+                                            $app_details['shelter_id'],
+                                            $app_details['adoption_fee']
+                                        ]);
                                     }
                                     
                                     // Update pet status to adopted
                                     $stmt = $db->prepare("
                                         UPDATE pets 
-                                        SET status = 'adopted', updated_at = NOW() 
+                                        SET status = 'adopted'
                                         WHERE pet_id = ?
                                     ");
                                     $stmt->execute([$app_details['pet_id']]);
+                                }
+                            } elseif ($new_status === 'rejected') {
+                                // If rejected, make sure pet is available again
+                                $stmt = $db->prepare("
+                                    SELECT pet_id FROM adoption_applications 
+                                    WHERE application_id = ?
+                                ");
+                                $stmt->execute([$adoption_id]);
+                                $pet_data = $stmt->fetch(PDO::FETCH_ASSOC);
+                                
+                                if ($pet_data) {
+                                    $stmt = $db->prepare("
+                                        UPDATE pets 
+                                        SET status = 'available'
+                                        WHERE pet_id = ?
+                                    ");
+                                    $stmt->execute([$pet_data['pet_id']]);
                                 }
                             }
                             
@@ -125,35 +151,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
                         $db->beginTransaction();
                         
                         try {
-                            // Delete related adoption record first
-                            $stmt = $db->prepare("DELETE FROM adoptions WHERE application_id = ?");
-                            $stmt->execute([$adoption_id]);
-                            
                             // Get pet_id before deleting application
                             $stmt = $db->prepare("SELECT pet_id FROM adoption_applications WHERE application_id = ?");
                             $stmt->execute([$adoption_id]);
-                            $pet_id = $stmt->fetchColumn();
+                            $pet_data = $stmt->fetch(PDO::FETCH_ASSOC);
+                            
+                            // Delete related adoption record first
+                            $stmt = $db->prepare("DELETE FROM adoptions WHERE application_id = ?");
+                            $stmt->execute([$adoption_id]);
                             
                             // Delete adoption application
                             $stmt = $db->prepare("DELETE FROM adoption_applications WHERE application_id = ?");
                             $stmt->execute([$adoption_id]);
                             
                             // Update pet status back to available if no other approved applications
-                            if ($pet_id) {
+                            if ($pet_data) {
                                 $stmt = $db->prepare("
-                                    SELECT COUNT(*) FROM adoption_applications 
-                                    WHERE pet_id = ? AND status = 'approved'
+                                    SELECT COUNT(*) as count FROM adoption_applications 
+                                    WHERE pet_id = ? AND application_status = 'approved'
                                 ");
-                                $stmt->execute([$pet_id]);
-                                $approved_count = $stmt->fetchColumn();
+                                $stmt->execute([$pet_data['pet_id']]);
+                                $approved_count = $stmt->fetch(PDO::FETCH_ASSOC)['count'];
                                 
                                 if ($approved_count == 0) {
                                     $stmt = $db->prepare("
                                         UPDATE pets 
-                                        SET status = 'available', updated_at = NOW() 
+                                        SET status = 'available'
                                         WHERE pet_id = ?
                                     ");
-                                    $stmt->execute([$pet_id]);
+                                    $stmt->execute([$pet_data['pet_id']]);
                                 }
                             }
                             
@@ -191,44 +217,38 @@ try {
             // Total adoptions (applications)
             $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications");
             $stmt->execute();
-            $result = $stmt->fetch();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
             $stats['total_adoptions'] = $result ? (int)$result['count'] : 0;
             
             // Pending applications
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE status = 'pending'");
+            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE application_status = 'pending'");
             $stmt->execute();
-            $result = $stmt->fetch();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
             $stats['pending_applications'] = $result ? (int)$result['count'] : 0;
             
             // Approved adoptions
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE status = 'approved'");
+            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE application_status = 'approved'");
             $stmt->execute();
-            $result = $stmt->fetch();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
             $stats['approved_adoptions'] = $result ? (int)$result['count'] : 0;
             
-            // Completed adoptions
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE status = 'completed'");
-            $stmt->execute();
-            $result = $stmt->fetch();
-            $stats['completed_adoptions'] = $result ? (int)$result['count'] : 0;
-            
             // Rejected applications
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE status = 'rejected'");
+            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE application_status = 'rejected'");
             $stmt->execute();
-            $result = $stmt->fetch();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
             $stats['rejected_applications'] = $result ? (int)$result['count'] : 0;
             
             // This month adoptions
             $stmt = $db->prepare("
                 SELECT COUNT(*) as count FROM adoption_applications 
-                WHERE MONTH(created_at) = MONTH(CURDATE()) 
-                AND YEAR(created_at) = YEAR(CURDATE())
+                WHERE MONTH(application_date) = MONTH(CURDATE()) 
+                AND YEAR(application_date) = YEAR(CURDATE())
             ");
             $stmt->execute();
-            $result = $stmt->fetch();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
             $stats['this_month_adoptions'] = $result ? (int)$result['count'] : 0;
         } catch (Exception $e) {
-            // Handle silently
+            error_log("Stats error: " . $e->getMessage());
         }
         
         // Build the adoptions query
@@ -236,27 +256,28 @@ try {
         $params = [];
         
         if (!empty($filter_status)) {
-            $where_conditions[] = "aa.status = ?";
+            $where_conditions[] = "aa.application_status = ?";
             $params[] = $filter_status;
         }
         
         if (!empty($filter_date_from)) {
-            $where_conditions[] = "DATE(aa.created_at) >= ?";
+            $where_conditions[] = "DATE(aa.application_date) >= ?";
             $params[] = $filter_date_from;
         }
         
         if (!empty($filter_date_to)) {
-            $where_conditions[] = "DATE(aa.created_at) <= ?";
+            $where_conditions[] = "DATE(aa.application_date) <= ?";
             $params[] = $filter_date_to;
         }
         
         if (!empty($search_query)) {
-            $where_conditions[] = "(p.name LIKE ? OR u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR s.shelter_name LIKE ?)";
-            $params[] = "%$search_query%";
-            $params[] = "%$search_query%";
-            $params[] = "%$search_query%";
-            $params[] = "%$search_query%";
-            $params[] = "%$search_query%";
+            $where_conditions[] = "(p.pet_name LIKE ? OR u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR s.shelter_name LIKE ?)";
+            $search_term = "%$search_query%";
+            $params[] = $search_term;
+            $params[] = $search_term;
+            $params[] = $search_term;
+            $params[] = $search_term;
+            $params[] = $search_term;
         }
         
         $where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
@@ -267,31 +288,35 @@ try {
             FROM adoption_applications aa
             LEFT JOIN pets p ON aa.pet_id = p.pet_id
             LEFT JOIN users u ON aa.adopter_id = u.user_id
-            LEFT JOIN shelters s ON p.shelter_id = s.shelter_id
+            LEFT JOIN shelters s ON aa.shelter_id = s.shelter_id
             $where_clause
         ";
         $stmt = $db->prepare($count_query);
         $stmt->execute($params);
-        $total_adoptions = $stmt->fetch()['total'] ?? 0;
-        $total_pages = ceil($total_adoptions / $per_page);
+        $count_result = $stmt->fetch(PDO::FETCH_ASSOC);
+        $total_adoptions = $count_result ? (int)$count_result['total'] : 0;
+        $total_pages = max(1, ceil($total_adoptions / $per_page));
         
         // Get adoptions with pagination
         try {
             $adoptions_query = "
                 SELECT aa.*, 
-                       p.name as pet_name, p.species, p.breed, p.age, p.photo_url,
+                       p.pet_name, p.age, p.gender, p.size, p.primary_image,
+                       pb.breed_name, pc.category_name,
                        u.first_name, u.last_name, u.email, u.phone,
-                       s.shelter_name, s.contact_email as shelter_email,
+                       s.shelter_name,
                        admin_u.first_name as admin_first_name, admin_u.last_name as admin_last_name,
-                       a.adoption_date, a.status as adoption_status
+                       ad.adoption_date
                 FROM adoption_applications aa
                 LEFT JOIN pets p ON aa.pet_id = p.pet_id
+                LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
+                LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
                 LEFT JOIN users u ON aa.adopter_id = u.user_id
-                LEFT JOIN shelters s ON p.shelter_id = s.shelter_id
+                LEFT JOIN shelters s ON aa.shelter_id = s.shelter_id
                 LEFT JOIN users admin_u ON aa.reviewed_by = admin_u.user_id
-                LEFT JOIN adoptions a ON aa.application_id = a.application_id
+                LEFT JOIN adoptions ad ON aa.application_id = ad.application_id
                 $where_clause
-                ORDER BY aa.created_at DESC
+                ORDER BY aa.application_date DESC
                 LIMIT $per_page OFFSET $offset
             ";
             
@@ -299,6 +324,7 @@ try {
             $stmt->execute($params);
             $adoptions = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         } catch (Exception $e) {
+            error_log("Adoptions query error: " . $e->getMessage());
             $adoptions = [];
         }
     }
@@ -490,10 +516,6 @@ try {
 
     .stat-card.approved {
         --color: #28a745;
-    }
-
-    .stat-card.completed {
-        --color: #17a2b8;
     }
 
     .stat-card.rejected {
@@ -733,11 +755,6 @@ try {
         color: #dc3545;
     }
 
-    .status-completed {
-        background: rgba(23, 162, 184, 0.2);
-        color: #17a2b8;
-    }
-
     /* Actions */
     .actions-group {
         display: flex;
@@ -854,29 +871,6 @@ try {
         min-height: 80px;
     }
 
-    /* Application Details View */
-    .detail-row {
-        display: flex;
-        justify-content: space-between;
-        padding: 10px 0;
-        border-bottom: 1px solid #f1f1f1;
-    }
-
-    .detail-row:last-child {
-        border-bottom: none;
-    }
-
-    .detail-label {
-        font-weight: 600;
-        color: #2c3e50;
-        flex: 0 0 140px;
-    }
-
-    .detail-value {
-        color: #666;
-        flex: 1;
-    }
-
     /* Empty State */
     .empty-state {
         text-align: center;
@@ -982,33 +976,6 @@ try {
         to {
             opacity: 1;
             transform: translateX(0);
-        }
-    }
-
-    /* Loading States */
-    .loading {
-        opacity: 0.6;
-        pointer-events: none;
-    }
-
-    .spinner {
-        border: 2px solid #f3f3f3;
-        border-top: 2px solid #28a745;
-        border-radius: 50%;
-        width: 20px;
-        height: 20px;
-        animation: spin 1s linear infinite;
-        display: inline-block;
-        margin-left: 10px;
-    }
-
-    @keyframes spin {
-        0% {
-            transform: rotate(0deg);
-        }
-
-        100% {
-            transform: rotate(360deg);
         }
     }
 
@@ -1140,18 +1107,6 @@ try {
                 </div>
             </div>
 
-            <div class="stat-card completed" onclick="filterByStatus('completed')">
-                <div class="stat-content">
-                    <div class="stat-info">
-                        <h3>Completed</h3>
-                        <div class="stat-number"><?php echo $stats['completed_adoptions']; ?></div>
-                    </div>
-                    <div class="stat-icon">
-                        <i class="fas fa-home"></i>
-                    </div>
-                </div>
-            </div>
-
             <div class="stat-card rejected" onclick="filterByStatus('rejected')">
                 <div class="stat-content">
                     <div class="stat-info">
@@ -1195,8 +1150,6 @@ try {
                                 Approved</option>
                             <option value="rejected" <?php echo $filter_status === 'rejected' ? 'selected' : ''; ?>>
                                 Rejected</option>
-                            <option value="completed" <?php echo $filter_status === 'completed' ? 'selected' : ''; ?>>
-                                Completed</option>
                         </select>
                     </div>
 
@@ -1246,7 +1199,7 @@ try {
                 </h2>
                 <div style="display: flex; gap: 10px;">
                     <span style="font-size: 0.9rem; color: #666;">
-                        Page <?php echo $page; ?> of <?php echo max(1, $total_pages); ?>
+                        Page <?php echo $page; ?> of <?php echo $total_pages; ?>
                     </span>
                 </div>
             </div>
@@ -1291,8 +1244,8 @@ try {
                         <tr data-adoption-id="<?php echo $adoption['application_id']; ?>">
                             <td>
                                 <div class="pet-info">
-                                    <?php if (!empty($adoption['photo_url'])): ?>
-                                    <img src="<?php echo $BASE_URL; ?>uploads/<?php echo htmlspecialchars($adoption['photo_url']); ?>"
+                                    <?php if (!empty($adoption['primary_image'])): ?>
+                                    <img src="<?php echo $BASE_URL; ?>uploads/<?php echo htmlspecialchars($adoption['primary_image']); ?>"
                                         alt="<?php echo htmlspecialchars($adoption['pet_name']); ?>" class="pet-photo">
                                     <?php else: ?>
                                     <div class="pet-photo"
@@ -1301,24 +1254,25 @@ try {
                                     </div>
                                     <?php endif; ?>
                                     <div class="pet-details">
-                                        <h4><?php echo htmlspecialchars($adoption['pet_name']); ?></h4>
+                                        <h4><?php echo htmlspecialchars($adoption['pet_name'] ?? 'Unknown Pet'); ?></h4>
                                         <div class="pet-meta">
                                             <div><i class="fas fa-info-circle"></i>
-                                                <?php echo htmlspecialchars($adoption['species'] . ' • ' . $adoption['breed']); ?>
+                                                <?php echo htmlspecialchars(($adoption['category_name'] ?? 'Unknown') . ' • ' . ($adoption['breed_name'] ?? 'Unknown')); ?>
                                             </div>
                                             <div><i class="fas fa-birthday-cake"></i>
-                                                <?php echo htmlspecialchars($adoption['age']); ?> years old</div>
+                                                <?php echo htmlspecialchars($adoption['age'] ?? 'Unknown'); ?> years old
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </td>
                             <td>
                                 <div class="adopter-info">
-                                    <h4><?php echo htmlspecialchars($adoption['first_name'] . ' ' . $adoption['last_name']); ?>
+                                    <h4><?php echo htmlspecialchars(($adoption['first_name'] ?? '') . ' ' . ($adoption['last_name'] ?? '')); ?>
                                     </h4>
                                     <div class="adopter-meta">
                                         <div><i class="fas fa-envelope"></i>
-                                            <?php echo htmlspecialchars($adoption['email']); ?></div>
+                                            <?php echo htmlspecialchars($adoption['email'] ?? 'No email'); ?></div>
                                         <?php if (!empty($adoption['phone'])): ?>
                                         <div><i class="fas fa-phone"></i>
                                             <?php echo htmlspecialchars($adoption['phone']); ?></div>
@@ -1329,30 +1283,25 @@ try {
                             <td>
                                 <div style="font-size: 0.9rem;">
                                     <div style="font-weight: 600; color: #2c3e50;">
-                                        <?php echo htmlspecialchars($adoption['shelter_name']); ?>
+                                        <?php echo htmlspecialchars($adoption['shelter_name'] ?? 'Unknown Shelter'); ?>
                                     </div>
-                                    <?php if (!empty($adoption['shelter_email'])): ?>
-                                    <div style="color: #666; font-size: 0.8rem;">
-                                        <i class="fas fa-envelope"></i>
-                                        <?php echo htmlspecialchars($adoption['shelter_email']); ?>
-                                    </div>
-                                    <?php endif; ?>
                                 </div>
                             </td>
                             <td>
-                                <span class="status-badge status-<?php echo $adoption['status']; ?>">
+                                <span
+                                    class="status-badge status-<?php echo $adoption['application_status'] ?? 'pending'; ?>">
                                     <?php 
-                                            $status_icons = [
-                                                'pending' => 'hourglass-half',
-                                                'approved' => 'check-circle',
-                                                'rejected' => 'times-circle',
-                                                'completed' => 'home'
-                                            ];
-                                            $icon = $status_icons[$adoption['status']] ?? 'question-circle';
-                                            echo '<i class="fas fa-' . $icon . '"></i> ' . ucfirst($adoption['status']);
-                                            ?>
+                                        $status = $adoption['application_status'] ?? 'pending';
+                                        $status_icons = [
+                                            'pending' => 'hourglass-half',
+                                            'approved' => 'check-circle',
+                                            'rejected' => 'times-circle'
+                                        ];
+                                        $icon = $status_icons[$status] ?? 'question-circle';
+                                        echo '<i class="fas fa-' . $icon . '"></i> ' . ucfirst($status);
+                                    ?>
                                 </span>
-                                <?php if ($adoption['status'] === 'approved' && !empty($adoption['adoption_date'])): ?>
+                                <?php if ($adoption['application_status'] === 'approved' && !empty($adoption['adoption_date'])): ?>
                                 <div style="font-size: 0.7rem; color: #666; margin-top: 4px;">
                                     Adopted: <?php echo date('M j, Y', strtotime($adoption['adoption_date'])); ?>
                                 </div>
@@ -1361,38 +1310,28 @@ try {
                             <td>
                                 <div style="font-size: 0.9rem;">
                                     <div style="font-weight: 600; color: #2c3e50;">
-                                        <?php echo date('M j, Y', strtotime($adoption['created_at'])); ?>
+                                        <?php echo date('M j, Y', strtotime($adoption['application_date'])); ?>
                                     </div>
                                     <div style="color: #666; font-size: 0.8rem;">
-                                        <?php echo date('g:i A', strtotime($adoption['created_at'])); ?>
+                                        <?php echo date('g:i A', strtotime($adoption['application_date'])); ?>
                                     </div>
                                 </div>
-                                <?php if (!empty($adoption['reviewed_at'])): ?>
+                                <?php if (!empty($adoption['reviewed_by'])): ?>
                                 <div style="font-size: 0.75rem; color: #28a745; margin-top: 5px;">
                                     <i class="fas fa-user-check"></i> Reviewed by
-                                    <?php echo htmlspecialchars($adoption['admin_first_name'] . ' ' . $adoption['admin_last_name']); ?>
-                                    <br>
-                                    <?php echo date('M j, Y g:i A', strtotime($adoption['reviewed_at'])); ?>
+                                    <?php echo htmlspecialchars(($adoption['admin_first_name'] ?? '') . ' ' . ($adoption['admin_last_name'] ?? '')); ?>
                                 </div>
                                 <?php endif; ?>
                             </td>
                             <td>
-                                <?php if (!empty($adoption['application_reason'])): ?>
+                                <?php if (!empty($adoption['reason_for_adoption'])): ?>
                                 <div class="application-notes"
-                                    title="<?php echo htmlspecialchars($adoption['application_reason']); ?>">
+                                    title="<?php echo htmlspecialchars($adoption['reason_for_adoption']); ?>">
                                     <strong>Application:</strong>
-                                    <?php echo htmlspecialchars($adoption['application_reason']); ?>
+                                    <?php echo htmlspecialchars($adoption['reason_for_adoption']); ?>
                                 </div>
                                 <?php endif; ?>
-                                <?php if (!empty($adoption['admin_notes'])): ?>
-                                <div class="application-notes"
-                                    title="<?php echo htmlspecialchars($adoption['admin_notes']); ?>"
-                                    style="margin-top: 5px; color: #dc3545;">
-                                    <strong>Admin Notes:</strong>
-                                    <?php echo htmlspecialchars($adoption['admin_notes']); ?>
-                                </div>
-                                <?php endif; ?>
-                                <?php if (empty($adoption['application_reason']) && empty($adoption['admin_notes'])): ?>
+                                <?php if (empty($adoption['reason_for_adoption'])): ?>
                                 <span style="color: #999; font-size: 0.8rem;">No notes</span>
                                 <?php endif; ?>
                             </td>
@@ -1403,7 +1342,7 @@ try {
                                         <i class="fas fa-eye"></i> View
                                     </button>
 
-                                    <?php if ($adoption['status'] === 'pending'): ?>
+                                    <?php if ($adoption['application_status'] === 'pending'): ?>
                                     <button class="btn btn-success btn-sm"
                                         onclick="updateAdoptionStatus(<?php echo $adoption['application_id']; ?>, 'approved')">
                                         <i class="fas fa-check"></i> Approve
@@ -1412,11 +1351,7 @@ try {
                                         onclick="updateAdoptionStatus(<?php echo $adoption['application_id']; ?>, 'rejected')">
                                         <i class="fas fa-times"></i> Reject
                                     </button>
-                                    <?php elseif ($adoption['status'] === 'approved'): ?>
-                                    <button class="btn btn-info btn-sm"
-                                        onclick="updateAdoptionStatus(<?php echo $adoption['application_id']; ?>, 'completed')">
-                                        <i class="fas fa-home"></i> Complete
-                                    </button>
+                                    <?php elseif ($adoption['application_status'] === 'approved'): ?>
                                     <button class="btn btn-warning btn-sm"
                                         onclick="updateAdoptionStatus(<?php echo $adoption['application_id']; ?>, 'pending')">
                                         <i class="fas fa-undo"></i> Pending
@@ -1429,7 +1364,7 @@ try {
                                     <?php endif; ?>
 
                                     <button class="btn btn-danger btn-sm"
-                                        onclick="confirmDeleteApplication(<?php echo $adoption['application_id']; ?>, '<?php echo htmlspecialchars($adoption['pet_name'], ENT_QUOTES); ?>')">
+                                        onclick="confirmDeleteApplication(<?php echo $adoption['application_id']; ?>, '<?php echo htmlspecialchars($adoption['pet_name'] ?? 'Unknown Pet', ENT_QUOTES); ?>')">
                                         <i class="fas fa-trash"></i> Delete
                                     </button>
                                 </div>
@@ -1460,10 +1395,10 @@ try {
                     <?php endif; ?>
 
                     <?php
-                            $start = max(1, $page - 2);
-                            $end = min($total_pages, $page + 2);
-                            
-                            if ($start > 1): ?>
+                        $start = max(1, $page - 2);
+                        $end = min($total_pages, $page + 2);
+                        
+                        if ($start > 1): ?>
                     <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => 1])); ?>">1</a>
                     <?php if ($start > 2): ?>
                     <span>...</span>
@@ -1532,7 +1467,6 @@ try {
                         <option value="pending">Pending Review</option>
                         <option value="approved">Approved</option>
                         <option value="rejected">Rejected</option>
-                        <option value="completed">Completed</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -1631,68 +1565,34 @@ try {
             '<div style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
         document.getElementById('applicationModal').style.display = 'block';
 
-        // Fetch details (you can implement this endpoint)
-        fetch(`<?php echo $BASE_URL; ?>admin/getApplicationDetails.php?id=${adoptionId}`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    displayApplicationDetails(data.application);
-                } else {
-                    document.getElementById('applicationDetails').innerHTML =
-                        '<div style="color: #dc3545; text-align: center;">Failed to load application details</div>';
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                document.getElementById('applicationDetails').innerHTML =
-                    '<div style="color: #dc3545; text-align: center;">Error loading application details</div>';
-            });
-    }
+        // For now, show basic details (you can implement the endpoint later)
+        const row = document.querySelector(`tr[data-adoption-id="${adoptionId}"]`);
+        if (row) {
+            const petName = row.querySelector('.pet-details h4').textContent;
+            const adopterName = row.querySelector('.adopter-info h4').textContent;
+            const status = row.querySelector('.status-badge').textContent.trim();
 
-    function displayApplicationDetails(application) {
-        const html = `
-                <div class="detail-row">
-                    <div class="detail-label">Application ID:</div>
-                    <div class="detail-value">#${application.application_id}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Pet Name:</div>
-                    <div class="detail-value">${application.pet_name}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Adopter:</div>
-                    <div class="detail-value">${application.adopter_name}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Email:</div>
-                    <div class="detail-value">${application.email}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Phone:</div>
-                    <div class="detail-value">${application.phone || 'Not provided'}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Application Date:</div>
-                    <div class="detail-value">${new Date(application.created_at).toLocaleString()}</div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Status:</div>
-                    <div class="detail-value">
-                        <span class="status-badge status-${application.status}">${application.status.toUpperCase()}</span>
+            const html = `
+                    <div style="display: flex; flex-direction: column; gap: 15px;">
+                        <div style="border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                            <strong>Application ID:</strong> #${adoptionId}
+                        </div>
+                        <div style="border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                            <strong>Pet Name:</strong> ${petName}
+                        </div>
+                        <div style="border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                            <strong>Adopter:</strong> ${adopterName}
+                        </div>
+                        <div style="border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                            <strong>Status:</strong> ${status}
+                        </div>
+                        <div style="text-align: center; color: #666; font-style: italic;">
+                            Additional details can be loaded via API endpoint
+                        </div>
                     </div>
-                </div>
-                <div class="detail-row">
-                    <div class="detail-label">Reason for Adoption:</div>
-                    <div class="detail-value">${application.application_reason || 'Not provided'}</div>
-                </div>
-                ${application.admin_notes ? `
-                <div class="detail-row">
-                    <div class="detail-label">Admin Notes:</div>
-                    <div class="detail-value">${application.admin_notes}</div>
-                </div>
-                ` : ''}
-            `;
-        document.getElementById('applicationDetails').innerHTML = html;
+                `;
+            document.getElementById('applicationDetails').innerHTML = html;
+        }
     }
 
     // Update adoption status
@@ -1719,10 +1619,12 @@ try {
 
     // Delete application
     function confirmDeleteApplication(adoptionId, petName) {
-        currentAdoptionId = adoptionId;
-        currentPetName = petName;
-        document.getElementById('deletePetName').textContent = `Application for: ${petName}`;
-        document.getElementById('deleteModal').style.display = 'block';
+        if (adoptionId && petName) {
+            currentAdoptionId = adoptionId;
+            currentPetName = petName;
+            document.getElementById('deletePetName').textContent = `Application for: ${petName}`;
+            document.getElementById('deleteModal').style.display = 'block';
+        }
     }
 
     function confirmDeleteApplication() {
@@ -1751,7 +1653,8 @@ try {
         }
 
         // Show loading state
-        document.body.classList.add('loading');
+        document.body.style.opacity = '0.7';
+        document.body.style.pointerEvents = 'none';
 
         fetch(window.location.href, {
                 method: 'POST',
@@ -1762,11 +1665,11 @@ try {
             })
             .then(response => response.json())
             .then(data => {
-                document.body.classList.remove('loading');
+                document.body.style.opacity = '1';
+                document.body.style.pointerEvents = 'auto';
 
                 if (data.success) {
                     showMessage(data.message, 'success');
-
                     // Refresh page after successful action
                     setTimeout(() => {
                         window.location.reload();
@@ -1776,7 +1679,8 @@ try {
                 }
             })
             .catch(error => {
-                document.body.classList.remove('loading');
+                document.body.style.opacity = '1';
+                document.body.style.pointerEvents = 'auto';
                 console.error('Error:', error);
                 showMessage('Network error occurred', 'error');
             });
@@ -1813,9 +1717,8 @@ try {
 
     // Export adoptions data
     function exportAdoptions() {
-        const url = new URL(window.location);
-        url.searchParams.set('export', 'csv');
-        window.open(url.toString(), '_blank');
+        // This would need to be implemented with proper export functionality
+        showMessage('Export functionality will be implemented', 'info');
     }
 
     // Keyboard shortcuts

@@ -76,17 +76,19 @@ switch ($date_filter) {
 
 // Handle export requests
 if (isset($_GET['export']) && $_GET['export'] === 'pdf') {
-    // You can implement PDF export here
     header('Content-Type: application/pdf');
     header('Content-Disposition: attachment; filename="reports_' . date('Y-m-d') . '.pdf"');
-    // PDF generation code would go here
+    echo "PDF export functionality will be implemented";
     exit();
 }
 
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv');
     header('Content-Disposition: attachment; filename="reports_' . date('Y-m-d') . '.csv"');
-    // CSV generation code would go here
+    // Simple CSV export
+    $csv_data = "Metric,Value\n";
+    $csv_data .= "Generated," . date('Y-m-d H:i:s') . "\n";
+    echo $csv_data;
     exit();
 }
 
@@ -101,62 +103,74 @@ try {
             // Total pets
             $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets");
             $stmt->execute();
-            $stats['total_pets'] = $stmt->fetchColumn() ?: 0;
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['total_pets'] = $result ? (int)$result['count'] : 0;
             
             // Total users
             $stmt = $db->prepare("SELECT COUNT(*) as count FROM users");
             $stmt->execute();
-            $stats['total_users'] = $stmt->fetchColumn() ?: 0;
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['total_users'] = $result ? (int)$result['count'] : 0;
             
             // Total adoptions
             $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications");
             $stmt->execute();
-            $stats['total_adoptions'] = $stmt->fetchColumn() ?: 0;
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['total_adoptions'] = $result ? (int)$result['count'] : 0;
             
             // Total shelters
             $stmt = $db->prepare("SELECT COUNT(*) as count FROM shelters");
             $stmt->execute();
-            $stats['total_shelters'] = $stmt->fetchColumn() ?: 0;
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['total_shelters'] = $result ? (int)$result['count'] : 0;
             
             // Adopted pets
             $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE status = 'adopted'");
             $stmt->execute();
-            $stats['adopted_pets'] = $stmt->fetchColumn() ?: 0;
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['adopted_pets'] = $result ? (int)$result['count'] : 0;
             
             // Pending adoptions
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE status = 'pending'");
+            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE application_status = 'pending'");
             $stmt->execute();
-            $stats['pending_adoptions'] = $stmt->fetchColumn() ?: 0;
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['pending_adoptions'] = $result ? (int)$result['count'] : 0;
             
             // Total vaccinations
             $stmt = $db->prepare("SELECT COUNT(*) as count FROM vaccinations");
             $stmt->execute();
-            $stats['total_vaccinations'] = $stmt->fetchColumn() ?: 0;
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['total_vaccinations'] = $result ? (int)$result['count'] : 0;
             
             // Overdue vaccinations
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM vaccinations WHERE administered_date IS NULL AND next_due_date < CURDATE()");
+            $stmt = $db->prepare("SELECT COUNT(*) as count FROM vaccinations WHERE vaccination_date IS NULL AND next_due_date < CURDATE()");
             $stmt->execute();
-            $stats['overdue_vaccinations'] = $stmt->fetchColumn() ?: 0;
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['overdue_vaccinations'] = $result ? (int)$result['count'] : 0;
             
             // Active users
             $stmt = $db->prepare("SELECT COUNT(*) as count FROM users WHERE is_active = 1");
             $stmt->execute();
-            $stats['active_users'] = $stmt->fetchColumn() ?: 0;
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['active_users'] = $result ? (int)$result['count'] : 0;
             
             // This month adoptions
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE())");
+            $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE MONTH(application_date) = MONTH(CURDATE()) AND YEAR(application_date) = YEAR(CURDATE())");
             $stmt->execute();
-            $stats['this_month_adoptions'] = $stmt->fetchColumn() ?: 0;
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['this_month_adoptions'] = $result ? (int)$result['count'] : 0;
             
             // This month registrations
             $stmt = $db->prepare("SELECT COUNT(*) as count FROM users WHERE MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE())");
             $stmt->execute();
-            $stats['this_month_registrations'] = $stmt->fetchColumn() ?: 0;
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['this_month_registrations'] = $result ? (int)$result['count'] : 0;
             
             // This month pets added
             $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE MONTH(created_at) = MONTH(CURDATE()) AND YEAR(created_at) = YEAR(CURDATE())");
             $stmt->execute();
-            $stats['this_month_pets'] = $stmt->fetchColumn() ?: 0;
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['this_month_pets'] = $result ? (int)$result['count'] : 0;
             
         } catch (Exception $e) {
             error_log("Stats error: " . $e->getMessage());
@@ -166,16 +180,17 @@ try {
         try {
             $stmt = $db->prepare("
                 SELECT 
-                    DATE_FORMAT(created_at, '%Y-%m') as month,
+                    DATE_FORMAT(application_date, '%Y-%m') as month,
                     COUNT(*) as count
                 FROM adoption_applications 
-                WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
-                GROUP BY DATE_FORMAT(created_at, '%Y-%m')
+                WHERE application_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+                GROUP BY DATE_FORMAT(application_date, '%Y-%m')
                 ORDER BY month ASC
             ");
             $stmt->execute();
             $adoption_trends = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         } catch (Exception $e) {
+            error_log("Adoption trends error: " . $e->getMessage());
             $adoption_trends = [];
         }
         
@@ -187,71 +202,131 @@ try {
                     COUNT(DISTINCT p.pet_id) as total_pets,
                     COUNT(DISTINCT aa.application_id) as total_applications,
                     COUNT(DISTINCT CASE WHEN p.status = 'adopted' THEN p.pet_id END) as adopted_pets,
-                    COUNT(DISTINCT CASE WHEN aa.status = 'approved' THEN aa.application_id END) as approved_applications
+                    COUNT(DISTINCT CASE WHEN aa.application_status = 'approved' THEN aa.application_id END) as approved_applications
                 FROM shelters s
                 LEFT JOIN pets p ON s.shelter_id = p.shelter_id
                 LEFT JOIN adoption_applications aa ON p.pet_id = aa.pet_id
                 GROUP BY s.shelter_id, s.shelter_name
                 ORDER BY total_pets DESC
+                LIMIT 10
             ");
             $stmt->execute();
             $shelter_stats = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         } catch (Exception $e) {
+            error_log("Shelter stats error: " . $e->getMessage());
             $shelter_stats = [];
         }
         
-        // Get vaccination statistics by type
+        // Get vaccination statistics
         try {
             $stmt = $db->prepare("
                 SELECT 
-                    vaccine_type,
+                    'All Vaccines' as vaccine_type,
                     COUNT(*) as count,
-                    COUNT(CASE WHEN administered_date IS NOT NULL THEN 1 END) as completed,
-                    COUNT(CASE WHEN administered_date IS NULL AND next_due_date < CURDATE() THEN 1 END) as overdue
-                FROM vaccinations 
-                GROUP BY vaccine_type
-                ORDER BY count DESC
+                    COUNT(CASE WHEN vaccination_date IS NOT NULL THEN 1 END) as completed,
+                    COUNT(CASE WHEN vaccination_date IS NULL AND next_due_date < CURDATE() THEN 1 END) as overdue
+                FROM vaccinations
             ");
             $stmt->execute();
             $vaccination_stats = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         } catch (Exception $e) {
+            error_log("Vaccination stats error: " . $e->getMessage());
             $vaccination_stats = [];
         }
         
         // Get recent activities
         try {
+            $recent_activities = [];
+            
+            // Get recent user registrations
             $stmt = $db->prepare("
-                (SELECT 'user_registration' as type, CONCAT(first_name, ' ', last_name) as description, created_at, user_type as extra_info FROM users ORDER BY created_at DESC LIMIT 5)
-                UNION ALL
-                (SELECT 'pet_added' as type, CONCAT('Pet: ', name, ' (', species, ')') as description, created_at, status as extra_info FROM pets ORDER BY created_at DESC LIMIT 5)
-                UNION ALL
-                (SELECT 'adoption_application' as type, CONCAT('Application for pet ID: ', pet_id) as description, created_at, status as extra_info FROM adoption_applications ORDER BY created_at DESC LIMIT 5)
-                UNION ALL
-                (SELECT 'vaccination' as type, CONCAT(vaccine_name, ' for pet ID: ', pet_id) as description, created_at, vaccine_type as extra_info FROM vaccinations ORDER BY created_at DESC LIMIT 5)
-                ORDER BY created_at DESC
-                LIMIT 20
+                SELECT 'user_registration' as type, 
+                       CONCAT(first_name, ' ', last_name) as description, 
+                       created_at, 
+                       user_type as extra_info 
+                FROM users 
+                ORDER BY created_at DESC 
+                LIMIT 5
             ");
             $stmt->execute();
-            $recent_activities = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            $user_activities = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            $recent_activities = array_merge($recent_activities, $user_activities);
+            
+            // Get recent pets added
+            $stmt = $db->prepare("
+                SELECT 'pet_added' as type, 
+                       CONCAT('Pet: ', pet_name) as description, 
+                       created_at, 
+                       status as extra_info 
+                FROM pets 
+                ORDER BY created_at DESC 
+                LIMIT 5
+            ");
+            $stmt->execute();
+            $pet_activities = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            $recent_activities = array_merge($recent_activities, $pet_activities);
+            
+            // Get recent adoption applications
+            $stmt = $db->prepare("
+                SELECT 'adoption_application' as type, 
+                       CONCAT('Application for pet ID: ', pet_id) as description, 
+                       application_date as created_at, 
+                       application_status as extra_info 
+                FROM adoption_applications 
+                ORDER BY application_date DESC 
+                LIMIT 5
+            ");
+            $stmt->execute();
+            $adoption_activities = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            $recent_activities = array_merge($recent_activities, $adoption_activities);
+            
+            // Get recent vaccinations
+            $stmt = $db->prepare("
+                SELECT 'vaccination' as type, 
+                       CONCAT(vaccine_name, ' for pet ID: ', pet_id) as description, 
+                       created_at, 
+                       'vaccine' as extra_info 
+                FROM vaccinations 
+                ORDER BY created_at DESC 
+                LIMIT 5
+            ");
+            $stmt->execute();
+            $vaccination_activities = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            $recent_activities = array_merge($recent_activities, $vaccination_activities);
+            
+            // Sort all activities by date and limit to 15
+            usort($recent_activities, function($a, $b) {
+                return strtotime($b['created_at']) - strtotime($a['created_at']);
+            });
+            $recent_activities = array_slice($recent_activities, 0, 15);
+            
         } catch (Exception $e) {
+            error_log("Recent activities error: " . $e->getMessage());
             $recent_activities = [];
         }
         
         // Prepare chart data
         $charts_data = [
-            'pets_by_species' => [],
+            'pets_by_category' => [],
             'pets_by_status' => [],
             'users_by_type' => [],
             'adoptions_by_month' => $adoption_trends
         ];
         
-        // Pets by species
+        // Pets by category
         try {
-            $stmt = $db->prepare("SELECT species, COUNT(*) as count FROM pets GROUP BY species ORDER BY count DESC");
+            $stmt = $db->prepare("
+                SELECT pc.category_name, COUNT(p.pet_id) as count 
+                FROM pet_categories pc
+                LEFT JOIN pets p ON pc.category_id = p.category_id
+                GROUP BY pc.category_id, pc.category_name 
+                ORDER BY count DESC
+            ");
             $stmt->execute();
-            $charts_data['pets_by_species'] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            $charts_data['pets_by_category'] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         } catch (Exception $e) {
-            $charts_data['pets_by_species'] = [];
+            error_log("Pets by category error: " . $e->getMessage());
+            $charts_data['pets_by_category'] = [];
         }
         
         // Pets by status
@@ -260,6 +335,7 @@ try {
             $stmt->execute();
             $charts_data['pets_by_status'] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         } catch (Exception $e) {
+            error_log("Pets by status error: " . $e->getMessage());
             $charts_data['pets_by_status'] = [];
         }
         
@@ -269,6 +345,7 @@ try {
             $stmt->execute();
             $charts_data['users_by_type'] = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         } catch (Exception $e) {
+            error_log("Users by type error: " . $e->getMessage());
             $charts_data['users_by_type'] = [];
         }
     }
@@ -501,14 +578,7 @@ try {
     .stat-change {
         font-size: 0.8rem;
         margin-top: 5px;
-    }
-
-    .stat-change.positive {
         color: #28a745;
-    }
-
-    .stat-change.negative {
-        color: #dc3545;
     }
 
     .stat-icon {
@@ -686,6 +756,46 @@ try {
         flex-shrink: 0;
     }
 
+    /* System Health Section */
+    .system-health {
+        background: white;
+        border-radius: 15px;
+        padding: 25px;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        margin-bottom: 30px;
+    }
+
+    .progress-bar {
+        background: #f8f9fa;
+        border-radius: 10px;
+        height: 8px;
+        overflow: hidden;
+        margin: 8px 0;
+    }
+
+    .progress-fill {
+        background: var(--color);
+        height: 100%;
+        transition: width 0.5s ease;
+    }
+
+    /* Empty State */
+    .empty-state {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        color: #666;
+        padding: 40px;
+    }
+
+    .empty-state i {
+        font-size: 3rem;
+        margin-bottom: 15px;
+        opacity: 0.3;
+    }
+
     /* Responsive Design */
     @media (max-width: 1200px) {
         .data-section {
@@ -725,33 +835,6 @@ try {
         }
     }
 
-    /* Loading States */
-    .loading {
-        opacity: 0.6;
-        pointer-events: none;
-    }
-
-    .spinner {
-        border: 2px solid #f3f3f3;
-        border-top: 2px solid #6f42c1;
-        border-radius: 50%;
-        width: 20px;
-        height: 20px;
-        animation: spin 1s linear infinite;
-        display: inline-block;
-        margin-left: 10px;
-    }
-
-    @keyframes spin {
-        0% {
-            transform: rotate(0deg);
-        }
-
-        100% {
-            transform: rotate(360deg);
-        }
-    }
-
     /* Animations */
     @keyframes fadeIn {
         from {
@@ -769,20 +852,28 @@ try {
         animation: fadeIn 0.6s ease-out;
     }
 
-    /* Print Styles */
-    @media print {
-        .page-header {
-            background: #6f42c1 !important;
-            -webkit-print-color-adjust: exact;
-            color-adjust: exact;
+    /* Messages */
+    .message {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        padding: 15px 20px;
+        border-radius: 10px;
+        z-index: 1001;
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        max-width: 400px;
+        animation: slideInRight 0.5s ease-out;
+    }
+
+    @keyframes slideInRight {
+        from {
+            opacity: 0;
+            transform: translateX(100%);
         }
 
-        .btn {
-            display: none;
-        }
-
-        .chart-container {
-            height: 250px !important;
+        to {
+            opacity: 1;
+            transform: translateX(0);
         }
     }
     </style>
@@ -849,7 +940,7 @@ try {
                     <div class="stat-info">
                         <h3>Total Pets</h3>
                         <div class="stat-number"><?php echo number_format($stats['total_pets']); ?></div>
-                        <div class="stat-change positive">
+                        <div class="stat-change">
                             <i class="fas fa-arrow-up"></i> <?php echo $stats['this_month_pets']; ?> this month
                         </div>
                     </div>
@@ -864,7 +955,7 @@ try {
                     <div class="stat-info">
                         <h3>Total Users</h3>
                         <div class="stat-number"><?php echo number_format($stats['total_users']); ?></div>
-                        <div class="stat-change positive">
+                        <div class="stat-change">
                             <i class="fas fa-arrow-up"></i> <?php echo $stats['this_month_registrations']; ?> this month
                         </div>
                     </div>
@@ -879,7 +970,7 @@ try {
                     <div class="stat-info">
                         <h3>Total Adoptions</h3>
                         <div class="stat-number"><?php echo number_format($stats['total_adoptions']); ?></div>
-                        <div class="stat-change positive">
+                        <div class="stat-change">
                             <i class="fas fa-arrow-up"></i> <?php echo $stats['this_month_adoptions']; ?> this month
                         </div>
                     </div>
@@ -907,14 +998,14 @@ try {
 
         <!-- Charts Section -->
         <div class="charts-section fade-in">
-            <!-- Pets by Species Chart -->
+            <!-- Pets by Category Chart -->
             <div class="chart-card">
                 <h3 class="chart-title">
                     <i class="fas fa-chart-pie"></i>
-                    Pets by Species
+                    Pets by Category
                 </h3>
                 <div class="chart-container">
-                    <canvas id="speciesChart"></canvas>
+                    <canvas id="categoryChart"></canvas>
                 </div>
             </div>
 
@@ -976,7 +1067,7 @@ try {
                                         $success_rate = $shelter['total_pets'] > 0 ? 
                                             round(($shelter['adopted_pets'] / $shelter['total_pets']) * 100, 1) : 0;
                                         $color = $success_rate >= 50 ? '#28a745' : ($success_rate >= 25 ? '#ffc107' : '#dc3545');
-                                        ?>
+                                    ?>
                                     <span style="color: <?php echo $color; ?>; font-weight: 600;">
                                         <?php echo $success_rate; ?>%
                                     </span>
@@ -1018,7 +1109,7 @@ try {
                                 'adoption_application' => 'fa-heart', 
                                 'vaccination' => 'fa-syringe'
                             ][$activity['type']] ?? 'fa-circle';
-                            ?>
+                        ?>
                         <div class="activity-icon <?php echo $icon_class; ?>">
                             <i class="fas <?php echo $icon; ?>"></i>
                         </div>
@@ -1032,7 +1123,7 @@ try {
                                         'vaccination' => 'Vaccination Record'
                                     ];
                                     echo $type_labels[$activity['type']] ?? 'Activity';
-                                    ?>
+                                ?>
                             </div>
                             <div class="activity-meta">
                                 <?php echo htmlspecialchars($activity['description']); ?>
@@ -1057,79 +1148,63 @@ try {
             </div>
         </div>
 
-        <!-- Additional Statistics Section -->
-        <div class="charts-section fade-in">
-            <!-- Vaccination Statistics -->
-            <div class="chart-card">
-                <h3 class="chart-title">
-                    <i class="fas fa-syringe"></i>
-                    Vaccination Overview
-                </h3>
-                <div style="padding: 20px 0;">
-                    <div
-                        style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 20px; text-align: center;">
+        <!-- System Health Section -->
+        <div class="system-health fade-in">
+            <h3 class="chart-title">
+                <i class="fas fa-heartbeat"></i>
+                System Health Overview
+            </h3>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 25px;">
+                <!-- Vaccination Statistics -->
+                <div style="background: #f8f9fa; border-radius: 10px; padding: 20px;">
+                    <h4 style="margin-bottom: 15px; color: #2c3e50;">
+                        <i class="fas fa-syringe"></i> Vaccination Overview
+                    </h4>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; text-align: center;">
                         <div>
-                            <div style="font-size: 2rem; font-weight: 700; color: #6f42c1; margin-bottom: 5px;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: #6f42c1; margin-bottom: 5px;">
                                 <?php echo number_format($stats['total_vaccinations']); ?>
                             </div>
-                            <div style="font-size: 0.9rem; color: #666;">Total Records</div>
+                            <div style="font-size: 0.85rem; color: #666;">Total Records</div>
                         </div>
                         <div>
-                            <div style="font-size: 2rem; font-weight: 700; color: #dc3545; margin-bottom: 5px;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: #dc3545; margin-bottom: 5px;">
                                 <?php echo number_format($stats['overdue_vaccinations']); ?>
                             </div>
-                            <div style="font-size: 0.9rem; color: #666;">Overdue</div>
-                        </div>
-                        <div>
-                            <div style="font-size: 2rem; font-weight: 700; color: #28a745; margin-bottom: 5px;">
-                                <?php echo number_format($stats['total_vaccinations'] - $stats['overdue_vaccinations']); ?>
-                            </div>
-                            <div style="font-size: 0.9rem; color: #666;">Up to Date</div>
+                            <div style="font-size: 0.85rem; color: #666;">Overdue</div>
                         </div>
                     </div>
 
-                    <!-- Vaccination Types Breakdown -->
-                    <?php if (!empty($vaccination_stats)): ?>
-                    <div style="margin-top: 25px;">
-                        <h4 style="margin-bottom: 15px; color: #2c3e50;">By Vaccine Type</h4>
-                        <div style="max-height: 150px; overflow-y: auto;">
-                            <?php foreach ($vaccination_stats as $vax_stat): ?>
-                            <div
-                                style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f1f1f1;">
-                                <span style="font-weight: 600; color: #2c3e50;">
-                                    <?php echo htmlspecialchars($vax_stat['vaccine_type']); ?>
-                                </span>
-                                <div style="display: flex; gap: 15px; font-size: 0.85rem;">
-                                    <span style="color: #28a745;">
-                                        ✓ <?php echo $vax_stat['completed']; ?>
-                                    </span>
-                                    <span style="color: #dc3545;">
-                                        ! <?php echo $vax_stat['overdue']; ?>
-                                    </span>
-                                    <span style="color: #666;">
-                                        Total: <?php echo $vax_stat['count']; ?>
-                                    </span>
-                                </div>
-                            </div>
-                            <?php endforeach; ?>
+                    <?php if ($stats['total_vaccinations'] > 0): ?>
+                    <div style="margin-top: 15px;">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                            <span style="font-weight: 600; color: #2c3e50; font-size: 0.9rem;">Vaccination Status</span>
+                            <span style="font-weight: 600; color: #28a745; font-size: 0.9rem;">
+                                <?php 
+                                $completion_rate = round((($stats['total_vaccinations'] - $stats['overdue_vaccinations']) / $stats['total_vaccinations']) * 100, 1);
+                                echo $completion_rate . '%';
+                                ?>
+                            </span>
+                        </div>
+                        <div class="progress-bar" style="--color: #28a745;">
+                            <div class="progress-fill" style="width: <?php echo $completion_rate; ?>%;"></div>
                         </div>
                     </div>
                     <?php endif; ?>
                 </div>
-            </div>
 
-            <!-- System Health -->
-            <div class="chart-card">
-                <h3 class="chart-title">
-                    <i class="fas fa-heartbeat"></i>
-                    System Health
-                </h3>
-                <div style="padding: 20px 0;">
+                <!-- Adoption Statistics -->
+                <div style="background: #f8f9fa; border-radius: 10px; padding: 20px;">
+                    <h4 style="margin-bottom: 15px; color: #2c3e50;">
+                        <i class="fas fa-heart"></i> Adoption Overview
+                    </h4>
+
                     <!-- Active Users Percentage -->
-                    <div style="margin-bottom: 25px;">
+                    <div style="margin-bottom: 20px;">
                         <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                            <span style="font-weight: 600; color: #2c3e50;">Active Users</span>
-                            <span style="font-weight: 600; color: #17a2b8;">
+                            <span style="font-weight: 600; color: #2c3e50; font-size: 0.9rem;">Active Users</span>
+                            <span style="font-weight: 600; color: #17a2b8; font-size: 0.9rem;">
                                 <?php 
                                 $active_percentage = $stats['total_users'] > 0 ? 
                                     round(($stats['active_users'] / $stats['total_users']) * 100, 1) : 0;
@@ -1137,18 +1212,16 @@ try {
                                 ?>
                             </span>
                         </div>
-                        <div style="background: #f8f9fa; border-radius: 10px; height: 8px; overflow: hidden;">
-                            <div
-                                style="background: #17a2b8; height: 100%; width: <?php echo $active_percentage; ?>%; transition: width 0.5s ease;">
-                            </div>
+                        <div class="progress-bar" style="--color: #17a2b8;">
+                            <div class="progress-fill" style="width: <?php echo $active_percentage; ?>%;"></div>
                         </div>
                     </div>
 
                     <!-- Adoption Success Rate -->
-                    <div style="margin-bottom: 25px;">
+                    <div>
                         <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                            <span style="font-weight: 600; color: #2c3e50;">Pets Adopted</span>
-                            <span style="font-weight: 600; color: #28a745;">
+                            <span style="font-weight: 600; color: #2c3e50; font-size: 0.9rem;">Pets Adopted</span>
+                            <span style="font-weight: 600; color: #28a745; font-size: 0.9rem;">
                                 <?php 
                                 $adoption_percentage = $stats['total_pets'] > 0 ? 
                                     round(($stats['adopted_pets'] / $stats['total_pets']) * 100, 1) : 0;
@@ -1156,40 +1229,33 @@ try {
                                 ?>
                             </span>
                         </div>
-                        <div style="background: #f8f9fa; border-radius: 10px; height: 8px; overflow: hidden;">
-                            <div
-                                style="background: #28a745; height: 100%; width: <?php echo $adoption_percentage; ?>%; transition: width 0.5s ease;">
-                            </div>
+                        <div class="progress-bar" style="--color: #28a745;">
+                            <div class="progress-fill" style="width: <?php echo $adoption_percentage; ?>%;"></div>
                         </div>
                     </div>
-                    <!-- Pending Applications -->
-                    <div style="margin-bottom: 25px;">
-                        <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                            <span style="font-weight: 600; color: #2c3e50;">Pending Applications</span>
-                            <span style="font-weight: 600; color: #ffc107;">
-                                <?php echo number_format($stats['pending_adoptions']); ?>
-                            </span>
-                        </div>
-                        <div style="background: #f8f9fa; border-radius: 10px; height: 8px; overflow: hidden;">
-                            <?php 
-                            $pending_percentage = $stats['total_adoptions'] > 0 ? 
-                                ($stats['pending_adoptions'] / $stats['total_adoptions']) * 100 : 0;
-                            ?>
-                            <div
-                                style="background: #ffc107; height: 100%; width: <?php echo $pending_percentage; ?>%; transition: width 0.5s ease;">
-                            </div>
-                        </div>
-                    </div>
+                </div>
 
-                    <!-- Quick Actions -->
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 25px;">
-                        <a href="<?php echo $BASE_URL; ?>admin/manageAdoptions.php?status=pending"
-                            class="btn btn-warning" style="font-size: 0.8rem; padding: 8px 12px; text-align: center;">
-                            <i class="fas fa-clock"></i> Review Pending
+                <!-- Quick Actions -->
+                <div style="background: #f8f9fa; border-radius: 10px; padding: 20px;">
+                    <h4 style="margin-bottom: 15px; color: #2c3e50;">
+                        <i class="fas fa-bolt"></i> Quick Actions
+                    </h4>
+                    <div style="display: grid; gap: 10px;">
+                        <a href="<?php echo $BASE_URL; ?>admin/manageAdoptions.php?status=pending" class="btn btn-info"
+                            style="font-size: 0.85rem; padding: 10px 15px; text-align: center; justify-content: center;">
+                            <i class="fas fa-clock"></i> Review Pending Applications
+                            (<?php echo $stats['pending_adoptions']; ?>)
                         </a>
                         <a href="<?php echo $BASE_URL; ?>admin/manageVaccinations.php?status=overdue"
-                            class="btn btn-info" style="font-size: 0.8rem; padding: 8px 12px; text-align: center;">
-                            <i class="fas fa-exclamation-triangle"></i> Check Overdue
+                            class="btn btn-secondary"
+                            style="font-size: 0.85rem; padding: 10px 15px; text-align: center; justify-content: center;">
+                            <i class="fas fa-exclamation-triangle"></i> Check Overdue Vaccinations
+                            (<?php echo $stats['overdue_vaccinations']; ?>)
+                        </a>
+                        <a href="<?php echo $BASE_URL; ?>admin/managePets.php?status=available" class="btn btn-success"
+                            style="font-size: 0.85rem; padding: 10px 15px; text-align: center; justify-content: center;">
+                            <i class="fas fa-paw"></i> View Available Pets
+                            (<?php echo $stats['total_pets'] - $stats['adopted_pets']; ?>)
                         </a>
                     </div>
                 </div>
@@ -1197,10 +1263,11 @@ try {
         </div>
     </div>
 
+
     <script>
     // Chart colors
     const colors = {
-        primary: ['#6f42c1', '#e83e8c', '#17a2b8', '#28a745', '#ffc107', '#fd7e14', '#dc3545'],
+        primary: ['#6f42c1', '#e83e8c', '#17a2b8', '#28a745', '#ffc107', '#fd7e14', '#dc3545', '#6c757d'],
         gradients: {
             purple: 'linear-gradient(135deg, #6f42c1 0%, #e83e8c 100%)',
             blue: 'linear-gradient(135deg, #17a2b8 0%, #6f42c1 100%)',
@@ -1217,27 +1284,29 @@ try {
     // Initialize charts when page loads
     document.addEventListener('DOMContentLoaded', function() {
         initializeCharts();
+        animateCounters();
     });
 
     function initializeCharts() {
-        // Pets by Species Chart
-        const speciesData = <?php echo json_encode($charts_data['pets_by_species']); ?>;
-        if (speciesData.length > 0) {
-            createPieChart('speciesChart', {
-                labels: speciesData.map(item => item.species),
-                data: speciesData.map(item => parseInt(item.count)),
+        // Pets by Category Chart
+        const categoryData = <?php echo json_encode($charts_data['pets_by_category']); ?>;
+        if (categoryData.length > 0 && categoryData.some(item => item.count > 0)) {
+            createPieChart('categoryChart', {
+                labels: categoryData.map(item => item.category_name || 'Unknown'),
+                data: categoryData.map(item => parseInt(item.count) || 0),
                 colors: colors.primary
             });
         } else {
-            showNoDataMessage('speciesChart');
+            showNoDataMessage('categoryChart');
         }
 
         // Pets by Status Chart
         const statusData = <?php echo json_encode($charts_data['pets_by_status']); ?>;
         if (statusData.length > 0) {
             createDoughnutChart('statusChart', {
-                labels: statusData.map(item => item.status.charAt(0).toUpperCase() + item.status.slice(1)),
-                data: statusData.map(item => parseInt(item.count)),
+                labels: statusData.map(item => item.status ? item.status.charAt(0).toUpperCase() + item
+                    .status.slice(1) : 'Unknown'),
+                data: statusData.map(item => parseInt(item.count) || 0),
                 colors: colors.primary
             });
         } else {
@@ -1255,7 +1324,7 @@ try {
                         year: 'numeric'
                     });
                 }),
-                data: trendsData.map(item => parseInt(item.count))
+                data: trendsData.map(item => parseInt(item.count) || 0)
             });
         } else {
             showNoDataMessage('trendsChart');
@@ -1283,9 +1352,10 @@ try {
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                const total = context.dataset.data.reduce((sum, value) => sum + value,
-                                    0);
-                                const percentage = ((context.raw / total) * 100).toFixed(1);
+                                const total = context.dataset.data.reduce((sum, value) => sum +
+                                    value, 0);
+                                const percentage = total > 0 ? ((context.raw / total) * 100)
+                                    .toFixed(1) : 0;
                                 return `${context.label}: ${context.raw} (${percentage}%)`;
                             }
                         }
@@ -1317,9 +1387,10 @@ try {
                     tooltip: {
                         callbacks: {
                             label: function(context) {
-                                const total = context.dataset.data.reduce((sum, value) => sum + value,
-                                    0);
-                                const percentage = ((context.raw / total) * 100).toFixed(1);
+                                const total = context.dataset.data.reduce((sum, value) => sum +
+                                    value, 0);
+                                const percentage = total > 0 ? ((context.raw / total) * 100)
+                                    .toFixed(1) : 0;
                                 return `${context.label}: ${context.raw} (${percentage}%)`;
                             }
                         }
@@ -1401,8 +1472,8 @@ try {
         const canvas = document.getElementById(canvasId);
         const container = canvas.parentElement;
         container.innerHTML = `
-                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #666;">
-                    <i class="fas fa-chart-bar" style="font-size: 3rem; margin-bottom: 15px; opacity: 0.3;"></i>
+                <div class="empty-state">
+                    <i class="fas fa-chart-bar"></i>
                     <p style="margin: 0; font-size: 1.1rem;">No data available</p>
                     <p style="margin: 5px 0 0 0; font-size: 0.9rem; opacity: 0.7;">Data will appear as it becomes available</p>
                 </div>
@@ -1422,20 +1493,11 @@ try {
     }
 
     function refreshData() {
-        // Add loading state
-        document.body.classList.add('loading');
-
-        // Simulate refresh - in real app, you might use AJAX
-        setTimeout(() => {
-            window.location.reload();
-        }, 1000);
+        window.location.reload();
     }
 
     function exportToPDF() {
-        // In a real application, you would send a request to generate PDF
         showMessage('PDF export functionality would be implemented here', 'info');
-
-        // For now, open print dialog
         window.print();
     }
 
@@ -1481,19 +1543,9 @@ try {
         // Create new message
         const messageDiv = document.createElement('div');
         messageDiv.className = 'message';
-        messageDiv.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                padding: 15px 20px;
-                border-radius: 10px;
-                z-index: 1001;
-                box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-                max-width: 400px;
-                animation: slideInRight 0.5s ease-out;
-                background: ${type === 'success' ? '#28a745' : type === 'error' ? '#dc3545' : '#17a2b8'};
-                color: white;
-            `;
+        messageDiv.style.background = type === 'success' ? '#28a745' :
+            type === 'error' ? '#dc3545' : '#17a2b8';
+        messageDiv.style.color = 'white';
 
         messageDiv.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 10px;">
@@ -1512,37 +1564,26 @@ try {
         }, 5000);
     }
 
-    // Real-time updates (if needed)
-    function startRealTimeUpdates() {
-        // Update every 5 minutes
-        setInterval(function() {
-            // In a real app, you might fetch updated statistics via AJAX
-            // For now, we'll just show when the last update occurred
-            const lastUpdate = document.createElement('div');
-            lastUpdate.style.cssText = `
-                    position: fixed;
-                    bottom: 20px;
-                    right: 20px;
-                    background: rgba(0,0,0,0.7);
-                    color: white;
-                    padding: 8px 12px;
-                    border-radius: 6px;
-                    font-size: 0.8rem;
-                    z-index: 1000;
-                `;
-            lastUpdate.textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
-            document.body.appendChild(lastUpdate);
-
-            setTimeout(() => {
-                if (lastUpdate.parentNode) {
-                    lastUpdate.remove();
-                }
-            }, 3000);
-        }, 300000); // 5 minutes
+    // Animate counters on page load
+    function animateCounters() {
+        const counters = document.querySelectorAll('.stat-number');
+        counters.forEach(counter => {
+            const target = parseInt(counter.textContent.replace(/,/g, ''));
+            if (target > 0) {
+                let current = 0;
+                const increment = target / 50;
+                const timer = setInterval(() => {
+                    current += increment;
+                    if (current >= target) {
+                        counter.textContent = target.toLocaleString();
+                        clearInterval(timer);
+                    } else {
+                        counter.textContent = Math.floor(current).toLocaleString();
+                    }
+                }, 20);
+            }
+        });
     }
-
-    // Initialize real-time updates
-    // startRealTimeUpdates();
 
     // Keyboard shortcuts
     document.addEventListener('keydown', function(event) {
@@ -1564,47 +1605,7 @@ try {
             exportToCSV();
         }
     });
-
-    // Animate counters on page load
-    function animateCounters() {
-        const counters = document.querySelectorAll('.stat-number');
-        counters.forEach(counter => {
-            const target = parseInt(counter.textContent.replace(/,/g, ''));
-            let current = 0;
-            const increment = target / 50;
-            const timer = setInterval(() => {
-                current += increment;
-                if (current >= target) {
-                    counter.textContent = target.toLocaleString();
-                    clearInterval(timer);
-                } else {
-                    counter.textContent = Math.floor(current).toLocaleString();
-                }
-            }, 20);
-        });
-    }
-
-    // Start counter animation after a short delay
-    setTimeout(animateCounters, 500);
     </script>
-
-    <style>
-    @keyframes slideInRight {
-        from {
-            opacity: 0;
-            transform: translateX(100%);
-        }
-
-        to {
-            opacity: 1;
-            transform: translateX(0);
-        }
-    }
-
-    .message {
-        animation: slideInRight 0.5s ease-out;
-    }
-    </style>
 </body>
 
 </html>

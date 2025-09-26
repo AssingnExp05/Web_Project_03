@@ -604,6 +604,34 @@ try {
         display: inline-block;
     }
 
+    .pet-info img {
+        width: 50px;
+        height: 50px;
+        border-radius: 10px;
+        object-fit: cover;
+        border: 2px solid #e1e8ed;
+        transition: all 0.3s ease;
+    }
+
+    .pet-info img:hover {
+        transform: scale(1.1);
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+
+    .pet-avatar {
+        width: 50px;
+        height: 50px;
+        border-radius: 10px;
+        background: linear-gradient(135deg, #dc3545, #6f42c1);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: 700;
+        font-size: 1.2rem;
+        border: 2px solid #e1e8ed;
+    }
+
     .status-available {
         background: rgba(40, 167, 69, 0.2);
         color: #28a745;
@@ -1105,12 +1133,17 @@ try {
                     <tbody>
                         <?php foreach ($pets as $pet): ?>
                         <tr>
+                            <!-- Replace this section in your pets table (around line 680) -->
                             <td>
                                 <div class="pet-info">
                                     <?php if (!empty($pet['primary_image'])): ?>
-                                    <img src="<?php echo $BASE_URL; ?>uploads/pets/<?php echo htmlspecialchars($pet['primary_image']); ?>"
+                                    <img src="<?php echo $BASE_URL; ?>uploads/<?php echo htmlspecialchars($pet['primary_image']); ?>"
                                         alt="<?php echo htmlspecialchars($pet['pet_name']); ?>"
-                                        style="width: 50px; height: 50px; border-radius: 10px; object-fit: cover;">
+                                        style="width: 50px; height: 50px; border-radius: 10px; object-fit: cover;"
+                                        onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                    <div class="pet-avatar" style="display: none;">
+                                        <?php echo strtoupper(substr($pet['pet_name'] ?? 'P', 0, 1)); ?>
+                                    </div>
                                     <?php else: ?>
                                     <div class="pet-avatar">
                                         <?php echo strtoupper(substr($pet['pet_name'] ?? 'P', 0, 1)); ?>
@@ -1122,6 +1155,7 @@ try {
                                     </div>
                                 </div>
                             </td>
+
                             <td>
                                 <strong><?php echo htmlspecialchars($pet['category_name'] ?? 'Unknown'); ?></strong><br>
                                 <small

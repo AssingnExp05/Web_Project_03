@@ -1,73 +1,113 @@
 <?php
-// adopter/dashboard.php - Adopter Dashboard Page
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
-// Start session
-session_start();
-
-// Base URL
-$BASE_URL = 'http://' . $_SERVER['HTTP_HOST'] . '/pet_care/';
+// Start session and include database
+require_once '../config/db.php';
 
 // Check if user is logged in and is an adopter
-if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] !== 'adopter') {
-    header('Location: ' . $BASE_URL . 'auth/login.php');
+if (!Session::isLoggedIn() || Session::getUserType() !== 'adopter') {
+    header('Location: ../auth/login.php');
     exit();
 }
 
-// Get user information
-$user_id = $_SESSION['user_id'];
-$page_title = 'Adopter Dashboard - Pet Adoption Care Guide';
+$adopter_user_id = Session::getUserId();
+$adopter_name = Session::get('first_name', 'User');
 
-// Initialize default values
-$applications_count = 0;
-$pending_count = 0;
-$approved_count = 0;
-$adoptions_count = 0;
-$applications = [];
-$my_pets = [];
-$recommendations = [];
+// Get adopter's basic information
+$adopter_info = DBHelper::selectOne(
+    "SELECT u.*, CONCAT(u.first_name, ' ', u.last_name) as full_name 
+     FROM users u 
+     WHERE u.user_id = ?",
+    [$adopter_user_id]
+);
 
-// Try to connect to database
-try {
-    require_once __DIR__ . '/../config/db.php';
-    $db = getDB();
-    
-    if ($db) {
-        // Get statistics
-        $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE adopter_id = ?");
-        $stmt->execute([$user_id]);
-        $result = $stmt->fetch();
-        $applications_count = $result ? (int)$result['count'] : 0;
-        
-        $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE adopter_id = ? AND application_status = 'pending'");
-        $stmt->execute([$user_id]);
-        $result = $stmt->fetch();
-        $pending_count = $result ? (int)$result['count'] : 0;
-        
-        $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE adopter_id = ? AND application_status = 'approved'");
-        $stmt->execute([$user_id]);
-        $result = $stmt->fetch();
-        $approved_count = $result ? (int)$result['count'] : 0;
-        
-        $stmt = $db->prepare("SELECT COUNT(*) as count FROM adoptions WHERE adopter_id = ?");
-        $stmt->execute([$user_id]);
-        $result = $stmt->fetch();
-        $adoptions_count = $result ? (int)$result['count'] : 0;
+if (!$adopter_info) {
+    die("Error: User information not found.");
+}
+
+// Get adoption applications statistics
+$adoption_stats = [
+    'pending' => DBHelper::count('adoption_applications', ['adopter_id' => $adopter_user_id, 'application_status' => 'pending']),
+    'approved' => DBHelper::count('adoption_applications', ['adopter_id' => $adopter_user_id, 'application_status' => 'approved']),
+    'rejected' => DBHelper::count('adoption_applications', ['adopter_id' => $adopter_user_id, 'application_status' => 'rejected']),
+    'total_applications' => DBHelper::count('adoption_applications', ['adopter_id' => $adopter_user_id])
+];
+
+// Get completed adoptions count
+$completed_adoptions = DBHelper::count('adoptions', ['adopter_id' => $adopter_user_id]);
+
+// Get recent adoption applications
+$recent_applications = DBHelper::select(
+    "SELECT aa.*, p.pet_name, p.primary_image, p.age, p.gender, p.adoption_fee,
+            pc.category_name, s.shelter_name,
+            DATEDIFF(CURDATE(), aa.application_date) as days_ago
+     FROM adoption_applications aa
+     INNER JOIN pets p ON aa.pet_id = p.pet_id
+     INNER JOIN pet_categories pc ON p.category_id = pc.category_id
+     INNER JOIN shelters s ON aa.shelter_id = s.shelter_id
+     WHERE aa.adopter_id = ?
+     ORDER BY aa.application_date DESC
+     LIMIT 5",
+    [$adopter_user_id]
+);
+
+// Get recommended pets (available pets that might interest the adopter)
+$recommended_pets = DBHelper::select(
+    "SELECT p.*, pc.category_name, pb.breed_name, s.shelter_name,
+            (SELECT COUNT(*) FROM adoption_applications aa2 WHERE aa2.pet_id = p.pet_id) as application_count
+     FROM pets p
+     INNER JOIN pet_categories pc ON p.category_id = pc.category_id
+     LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
+     INNER JOIN shelters s ON p.shelter_id = s.shelter_id
+     WHERE p.status = 'available'
+     AND p.pet_id NOT IN (
+         SELECT DISTINCT pet_id 
+         FROM adoption_applications 
+         WHERE adopter_id = ?
+     )
+     ORDER BY RAND()
+     LIMIT 6",
+    [$adopter_user_id]
+);
+
+// Get adopted pets (completed adoptions)
+$adopted_pets = DBHelper::select(
+    "SELECT a.*, p.pet_name, p.primary_image, p.age, p.gender,
+            pc.category_name, s.shelter_name,
+            DATEDIFF(CURDATE(), a.adoption_date) as days_since_adoption
+     FROM adoptions a
+     INNER JOIN pets p ON a.pet_id = p.pet_id
+     INNER JOIN pet_categories pc ON p.category_id = pc.category_id
+     INNER JOIN shelters s ON a.shelter_id = s.shelter_id
+     WHERE a.adopter_id = ?
+     ORDER BY a.adoption_date DESC
+     LIMIT 3",
+    [$adopter_user_id]
+);
+
+// Get care guides count (for quick stats)
+$care_guides_count = DBHelper::count('care_guides', ['is_published' => 1]);
+
+// Get upcoming events or reminders (you can expand this)
+$upcoming_reminders = [];
+foreach ($adopted_pets as $pet) {
+    if ($pet['days_since_adoption'] % 30 == 0 && $pet['days_since_adoption'] > 0) {
+        $upcoming_reminders[] = [
+            'type' => 'checkup',
+            'message' => "Monthly checkup reminder for {$pet['pet_name']}",
+            'pet_name' => $pet['pet_name'],
+            'days' => 0
+        ];
     }
-} catch (Exception $e) {
-    // Database connection failed, continue with default values
-    error_log("Database error: " . $e->getMessage());
 }
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo htmlspecialchars($page_title); ?></title>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <title>Dashboard - Pet Adoption Care Guide</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
     * {
         margin: 0;
@@ -76,100 +116,104 @@ try {
     }
 
     body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-        color: #333;
-        line-height: 1.6;
+        font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         min-height: 100vh;
+        color: #333;
     }
 
-    .container {
+    .dashboard-container {
         max-width: 1200px;
         margin: 0 auto;
         padding: 20px;
+        background: rgba(255, 255, 255, 0.95);
+        min-height: calc(100vh - 70px);
+        box-shadow: 0 0 50px rgba(0, 0, 0, 0.1);
     }
 
-    .header {
+    .welcome-section {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-        border-radius: 20px;
-        padding: 40px;
+        padding: 30px;
+        border-radius: 15px;
         margin-bottom: 30px;
-        text-align: center;
+        position: relative;
+        overflow: hidden;
     }
 
-    .header h1 {
+    .welcome-section::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 200px;
+        height: 200px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 50%;
+        transform: translate(50px, -50px);
+    }
+
+    .welcome-content {
+        position: relative;
+        z-index: 2;
+    }
+
+    .welcome-title {
         font-size: 2.5rem;
-        margin-bottom: 10px;
         font-weight: 700;
-    }
-
-    .header p {
-        font-size: 1.2rem;
-        margin-bottom: 30px;
-        opacity: 0.9;
-    }
-
-    .header-buttons {
+        margin-bottom: 10px;
         display: flex;
-        gap: 20px;
-        justify-content: center;
-        flex-wrap: wrap;
-    }
-
-    .btn {
-        padding: 12px 30px;
-        border: none;
-        border-radius: 25px;
-        text-decoration: none;
-        font-weight: 600;
-        font-size: 1rem;
-        transition: all 0.3s ease;
-        display: inline-flex;
         align-items: center;
-        gap: 10px;
-        cursor: pointer;
+        gap: 15px;
     }
 
-    .btn-primary {
-        background: #ffd700;
-        color: #667eea;
+    .welcome-subtitle {
+        font-size: 1.2rem;
+        opacity: 0.9;
+        font-weight: 300;
     }
 
-    .btn-primary:hover {
-        background: #ffed4e;
-        transform: translateY(-2px);
-        text-decoration: none;
-        color: #5a67d8;
+    .user-info-card {
+        margin-top: 20px;
+        padding: 20px;
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        gap: 15px;
     }
 
-    .btn-secondary {
-        background: rgba(255, 255, 255, 0.2);
+    .user-avatar-large {
+        width: 60px;
+        height: 60px;
+        background: linear-gradient(135deg, #e74c3c, #c0392b);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
         color: white;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-    }
-
-    .btn-secondary:hover {
-        background: rgba(255, 255, 255, 0.3);
-        text-decoration: none;
-        color: white;
+        font-weight: bold;
+        font-size: 1.5rem;
+        box-shadow: 0 4px 15px rgba(231, 76, 60, 0.3);
     }
 
     .stats-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 25px;
-        margin-bottom: 40px;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 20px;
+        margin-bottom: 30px;
     }
 
     .stat-card {
         background: white;
+        padding: 25px;
         border-radius: 15px;
-        padding: 30px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        text-align: center;
         transition: all 0.3s ease;
         position: relative;
         overflow: hidden;
+        cursor: pointer;
     }
 
     .stat-card::before {
@@ -178,388 +222,384 @@ try {
         top: 0;
         left: 0;
         right: 0;
-        height: 5px;
-        background: var(--color);
+        height: 4px;
+        background: var(--card-color, #667eea);
     }
 
     .stat-card:hover {
-        transform: translateY(-10px);
-        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
-    }
-
-    .stat-card.applications {
-        --color: #667eea;
+        transform: translateY(-5px);
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
     }
 
     .stat-card.pending {
-        --color: #f39c12;
+        --card-color: #ffa726;
     }
 
     .stat-card.approved {
-        --color: #27ae60;
+        --card-color: #66bb6a;
     }
 
-    .stat-card.adoptions {
-        --color: #e74c3c;
+    .stat-card.rejected {
+        --card-color: #ef5350;
     }
 
-    .stat-content {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
+    .stat-card.adopted {
+        --card-color: #42a5f5;
     }
 
-    .stat-info h3 {
-        color: #666;
-        font-size: 0.9rem;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        margin-bottom: 10px;
-    }
-
-    .stat-number {
-        font-size: 3rem;
-        font-weight: 700;
-        color: var(--color);
-        line-height: 1;
+    .stat-card.guides {
+        --card-color: #ab47bc;
     }
 
     .stat-icon {
-        width: 70px;
-        height: 70px;
-        border-radius: 15px;
-        background: var(--color);
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 2rem;
-        opacity: 0.9;
+        font-size: 2.5rem;
+        margin-bottom: 15px;
+        color: var(--card-color, #667eea);
     }
 
-    .section {
-        background: white;
-        border-radius: 20px;
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    .stat-number {
+        font-size: 2.5rem;
+        font-weight: 700;
+        margin-bottom: 5px;
+        color: var(--card-color, #667eea);
+    }
+
+    .stat-label {
+        font-size: 0.95rem;
+        color: #666;
+        font-weight: 500;
+    }
+
+    .main-content {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 30px;
         margin-bottom: 30px;
+    }
+
+    .content-section {
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
         overflow: hidden;
     }
 
     .section-header {
-        background: #f8f9fa;
-        padding: 25px 30px;
-        border-bottom: 1px solid #eee;
+        background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+        padding: 25px;
+        border-bottom: 1px solid #e9ecef;
+    }
+
+    .section-header h3 {
+        color: #495057;
+        font-size: 1.4rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .section-body {
+        padding: 25px;
+    }
+
+    .application-item {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        padding: 15px;
+        border: 2px solid #f8f9fa;
+        border-radius: 12px;
+        margin-bottom: 15px;
+        transition: all 0.3s ease;
+        cursor: pointer;
+    }
+
+    .application-item:hover {
+        border-color: #667eea;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.1);
+    }
+
+    .pet-image {
+        width: 60px;
+        height: 60px;
+        border-radius: 10px;
+        object-fit: cover;
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 1.5rem;
+    }
+
+    .application-info {
+        flex: 1;
+    }
+
+    .pet-name {
+        font-weight: 600;
+        font-size: 1.1rem;
+        color: #333;
+        margin-bottom: 5px;
+    }
+
+    .pet-details {
+        font-size: 0.9rem;
+        color: #666;
+        margin-bottom: 5px;
+    }
+
+    .application-meta {
+        font-size: 0.8rem;
+        color: #999;
+    }
+
+    .status-badge {
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-align: center;
+        min-width: 80px;
+    }
+
+    .status-pending {
+        background: #fff3e0;
+        color: #ef6c00;
+        border: 1px solid #ffcc02;
+    }
+
+    .status-approved {
+        background: #e8f5e8;
+        color: #2e7d32;
+        border: 1px solid #c8e6c9;
+    }
+
+    .status-rejected {
+        background: #ffebee;
+        color: #c62828;
+        border: 1px solid #ffcdd2;
+    }
+
+    .pet-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 20px;
+        margin-top: 20px;
+    }
+
+    .pet-card {
+        background: white;
+        border-radius: 15px;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        transition: all 0.3s ease;
+        cursor: pointer;
+    }
+
+    .pet-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
+    }
+
+    .pet-card-image {
+        width: 100%;
+        height: 180px;
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-size: 3rem;
+        position: relative;
+    }
+
+    .pet-card-image img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+
+    .pet-card-content {
+        padding: 20px;
+    }
+
+    .pet-card-title {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 10px;
+    }
+
+    .pet-card-details {
+        font-size: 0.9rem;
+        color: #666;
+        margin-bottom: 15px;
+    }
+
+    .pet-card-footer {
         display: flex;
         justify-content: space-between;
         align-items: center;
     }
 
-    .section-title {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #2c3e50;
-        margin: 0;
-        display: flex;
-        align-items: center;
-        gap: 15px;
-    }
-
-    .section-title i {
-        color: #667eea;
-        font-size: 1.3rem;
-    }
-
-    .section-link {
-        color: #667eea;
-        text-decoration: none;
+    .adoption-fee {
+        font-size: 1.1rem;
         font-weight: 600;
-        display: flex;
+        color: #2e7d32;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        text-decoration: none;
+        display: inline-flex;
         align-items: center;
         gap: 8px;
-        transition: color 0.3s ease;
+        justify-content: center;
     }
 
-    .section-link:hover {
-        color: #5a67d8;
-        text-decoration: none;
+    .btn-primary {
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        color: white;
     }
 
-    .section-content {
-        padding: 30px;
+    .btn-primary:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+    }
+
+    .btn-outline {
+        background: transparent;
+        color: #667eea;
+        border: 2px solid #667eea;
+    }
+
+    .btn-outline:hover {
+        background: #667eea;
+        color: white;
     }
 
     .empty-state {
         text-align: center;
-        padding: 60px 30px;
-        color: #666;
+        padding: 40px 20px;
+        color: #6c757d;
     }
 
-    .empty-icon {
+    .empty-state-icon {
         font-size: 4rem;
         margin-bottom: 20px;
         opacity: 0.3;
-        color: #667eea;
-    }
-
-    .empty-title {
-        font-size: 1.5rem;
-        font-weight: 600;
-        margin-bottom: 15px;
-        color: #2c3e50;
-    }
-
-    .empty-text {
-        margin-bottom: 30px;
-        line-height: 1.8;
-        font-size: 1.1rem;
     }
 
     .quick-actions {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 25px;
-    }
-
-    .action-card {
-        background: #f8f9fa;
-        padding: 30px;
-        border-radius: 15px;
-        text-align: center;
-        transition: all 0.3s ease;
-        cursor: pointer;
-        border: 2px solid transparent;
-    }
-
-    .action-card:hover {
-        background: white;
-        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
-        transform: translateY(-5px);
-        border-color: var(--hover-color);
-    }
-
-    .action-card.find {
-        --hover-color: #667eea;
-    }
-
-    .action-card.track {
-        --hover-color: #f39c12;
-    }
-
-    .action-card.guides {
-        --hover-color: #27ae60;
-    }
-
-    .action-card.help {
-        --hover-color: #e74c3c;
-    }
-
-    .action-icon {
-        width: 80px;
-        height: 80px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin: 0 auto 20px;
-        color: white;
-        font-size: 2rem;
-        transition: all 0.3s ease;
-    }
-
-    .action-card.find .action-icon {
-        background: #667eea;
-    }
-
-    .action-card.track .action-icon {
-        background: #f39c12;
-    }
-
-    .action-card.guides .action-icon {
-        background: #27ae60;
-    }
-
-    .action-card.help .action-icon {
-        background: #e74c3c;
-    }
-
-    .action-title {
-        font-size: 1.3rem;
-        font-weight: 600;
-        margin-bottom: 15px;
-        color: #2c3e50;
-    }
-
-    .action-text {
-        color: #666;
-        margin-bottom: 25px;
-        line-height: 1.6;
-    }
-
-    .tips-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-        gap: 25px;
-    }
-
-    .tip-card {
-        padding: 25px;
-        border-radius: 15px;
-        border-left: 5px solid var(--tip-color);
-        background: linear-gradient(135deg, var(--tip-bg), var(--tip-bg2));
-        transition: all 0.3s ease;
-    }
-
-    .tip-card:hover {
-        transform: translateX(10px);
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-    }
-
-    .tip-card.home {
-        --tip-color: #667eea;
-        --tip-bg: #667eea15;
-        --tip-bg2: #764ba215;
-    }
-
-    .tip-card.patience {
-        --tip-color: #f39c12;
-        --tip-bg: #f39c1215;
-        --tip-bg2: #e67e2215;
-    }
-
-    .tip-card.vet {
-        --tip-color: #27ae60;
-        --tip-bg: #27ae6015;
-        --tip-bg2: #2ecc7115;
-    }
-
-    .tip-header {
-        display: flex;
-        align-items: center;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
         gap: 15px;
-        margin-bottom: 15px;
+        margin-top: 20px;
     }
 
-    .tip-icon {
-        color: var(--tip-color);
-        font-size: 1.5rem;
-    }
-
-    .tip-title {
-        font-size: 1.2rem;
-        font-weight: 600;
-        color: #2c3e50;
-        margin: 0;
-    }
-
-    .tip-text {
-        color: #666;
-        line-height: 1.7;
-    }
-
-    .footer {
-        background: #2c3e50;
+    .quick-action {
+        background: linear-gradient(135deg, #667eea, #764ba2);
         color: white;
-        padding: 50px 0;
-        margin-top: 50px;
-    }
-
-    .footer-content {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 0 20px;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-        gap: 40px;
-    }
-
-    .footer-section h4 {
-        color: #ffd700;
-        margin-bottom: 20px;
-        font-size: 1.2rem;
-    }
-
-    .footer-section p {
-        color: #bdc3c7;
-        line-height: 1.8;
-        margin-bottom: 20px;
-    }
-
-    .footer-links {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-    }
-
-    .footer-links a {
-        color: #bdc3c7;
+        padding: 20px;
+        border-radius: 12px;
         text-decoration: none;
-        transition: color 0.3s ease;
-    }
-
-    .footer-links a:hover {
-        color: #ffd700;
-    }
-
-    .social-links {
+        transition: all 0.3s ease;
         display: flex;
+        align-items: center;
         gap: 15px;
     }
 
-    .social-links a {
-        color: #ffd700;
-        font-size: 1.5rem;
-        transition: color 0.3s ease;
+    .quick-action:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 10px 25px rgba(102, 126, 234, 0.3);
     }
 
-    .social-links a:hover {
-        color: white;
+    .quick-action-icon {
+        font-size: 2rem;
+        opacity: 0.8;
     }
 
-    .footer-bottom {
-        border-top: 1px solid #34495e;
-        padding-top: 20px;
-        margin-top: 30px;
-        text-align: center;
-        color: #bdc3c7;
+    .reminder-item {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        padding: 15px;
+        background: #fff3cd;
+        border-radius: 8px;
+        border-left: 4px solid #ffc107;
+        margin-bottom: 10px;
+    }
+
+    .reminder-icon {
+        color: #856404;
+        font-size: 1.2rem;
+    }
+
+    .reminder-content {
+        flex: 1;
+        color: #856404;
     }
 
     @media (max-width: 768px) {
-        .container {
-            padding: 15px;
+        .dashboard-container {
+            padding: 10px;
         }
 
-        .header {
-            padding: 30px 20px;
-        }
-
-        .header h1 {
+        .welcome-title {
             font-size: 2rem;
         }
 
-        .header-buttons {
-            flex-direction: column;
-            align-items: center;
+        .main-content {
+            grid-template-columns: 1fr;
         }
 
         .stats-grid {
             grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
+        }
+
+        .pet-grid {
+            grid-template-columns: 1fr;
         }
 
         .quick-actions {
             grid-template-columns: 1fr;
         }
+    }
 
-        .tips-grid {
-            grid-template-columns: 1fr;
+    /* Loading animation */
+    .loading {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(255, 255, 255, .3);
+        border-radius: 50%;
+        border-top-color: #fff;
+        animation: spin 1s ease-in-out infinite;
+    }
+
+    @keyframes spin {
+        to {
+            transform: rotate(360deg);
         }
+    }
+
+    /* Fade in animation */
+    .fade-in {
+        animation: fadeIn 0.5s ease-in;
     }
 
     @keyframes fadeIn {
         from {
             opacity: 0;
-            transform: translateY(30px);
+            transform: translateY(20px);
         }
 
         to {
@@ -567,327 +607,435 @@ try {
             transform: translateY(0);
         }
     }
-
-    .animate {
-        animation: fadeIn 0.8s ease-out;
-    }
     </style>
 </head>
 
 <body>
-    <?php include_once __DIR__ . '/../common/navbar_adopter.php'; ?>
+    <?php include '../common/navbar_adopter.php'; ?>
 
-    <div class="container">
-        <!-- Welcome Header -->
-        <div class="header animate">
-            <h1>Welcome back, <?php echo htmlspecialchars($_SESSION['first_name'] ?? 'Friend'); ?>! 👋</h1>
-            <p>Ready to find your perfect companion or check on your applications?</p>
-            <div class="header-buttons">
-                <a href="<?php echo $BASE_URL; ?>adopter/browsePets.php" class="btn btn-primary">
-                    <i class="fas fa-search"></i>
-                    Browse Available Pets
-                </a>
-                <a href="<?php echo $BASE_URL; ?>adopter/careGuides.php" class="btn btn-secondary">
-                    <i class="fas fa-book"></i>
-                    Care Guides
-                </a>
+    <div class="dashboard-container">
+        <!-- Welcome Section -->
+        <div class="welcome-section fade-in">
+            <div class="welcome-content">
+                <h1 class="welcome-title">
+                    <i class="fas fa-heart"></i>
+                    Welcome back, <?php echo htmlspecialchars($adopter_name); ?>!
+                </h1>
+                <p class="welcome-subtitle">Find your perfect companion and give them a loving home</p>
+
+                <div class="user-info-card">
+                    <div class="user-avatar-large">
+                        <?php echo strtoupper(substr($adopter_name, 0, 1)); ?>
+                    </div>
+                    <div>
+                        <div style="font-weight: 600; font-size: 1.1rem;">
+                            <?php echo htmlspecialchars($adopter_info['full_name']); ?>
+                        </div>
+                        <div style="opacity: 0.8;">
+                            <i class="fas fa-envelope"></i>
+                            <?php echo htmlspecialchars($adopter_info['email']); ?>
+                        </div>
+                        <div style="opacity: 0.8;">
+                            <i class="fas fa-calendar"></i>
+                            Member since <?php echo date('M Y', strtotime($adopter_info['created_at'])); ?>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <!-- Statistics Cards -->
-        <div class="stats-grid animate">
-            <div class="stat-card applications">
-                <div class="stat-content">
-                    <div class="stat-info">
-                        <h3>Total Applications</h3>
-                        <div class="stat-number"><?php echo $applications_count; ?></div>
-                    </div>
-                    <div class="stat-icon">
+        <!-- Statistics Grid -->
+        <div class="stats-grid fade-in">
+            <div class="stat-card pending" onclick="window.location.href='myAdoptions.php?filter=pending'">
+                <div class="stat-icon"><i class="fas fa-clock"></i></div>
+                <div class="stat-number"><?php echo $adoption_stats['pending']; ?></div>
+                <div class="stat-label">Pending Applications</div>
+            </div>
+
+            <div class="stat-card approved" onclick="window.location.href='myAdoptions.php?filter=approved'">
+                <div class="stat-icon"><i class="fas fa-check-circle"></i></div>
+                <div class="stat-number"><?php echo $adoption_stats['approved']; ?></div>
+                <div class="stat-label">Approved Applications</div>
+            </div>
+
+            <div class="stat-card adopted" onclick="window.location.href='myAdoptions.php?filter=adopted'">
+                <div class="stat-icon"><i class="fas fa-heart"></i></div>
+                <div class="stat-number"><?php echo $completed_adoptions; ?></div>
+                <div class="stat-label">Adopted Pets</div>
+            </div>
+
+            <div class="stat-card guides" onclick="window.location.href='careGuides.php'">
+                <div class="stat-icon"><i class="fas fa-book-open"></i></div>
+                <div class="stat-number"><?php echo $care_guides_count; ?></div>
+                <div class="stat-label">Care Guides Available</div>
+            </div>
+
+            <?php if ($adoption_stats['rejected'] > 0): ?>
+            <div class="stat-card rejected" onclick="window.location.href='myAdoptions.php?filter=rejected'">
+                <div class="stat-icon"><i class="fas fa-times-circle"></i></div>
+                <div class="stat-number"><?php echo $adoption_stats['rejected']; ?></div>
+                <div class="stat-label">Declined Applications</div>
+            </div>
+            <?php endif; ?>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="main-content">
+            <!-- Recent Applications -->
+            <div class="content-section fade-in">
+                <div class="section-header">
+                    <h3>
                         <i class="fas fa-file-alt"></i>
-                    </div>
+                        Recent Applications
+                    </h3>
                 </div>
-            </div>
+                <div class="section-body">
+                    <?php if (!empty($recent_applications)): ?>
+                    <?php foreach ($recent_applications as $app): ?>
+                    <div class="application-item"
+                        onclick="window.location.href='petDetails.php?id=<?php echo $app['pet_id']; ?>'">
+                        <div class="pet-image">
+                            <?php if ($app['primary_image']): ?>
+                            <img src="../uploads/<?php echo htmlspecialchars($app['primary_image']); ?>"
+                                alt="<?php echo htmlspecialchars($app['pet_name']); ?>">
+                            <?php else: ?>
+                            <i class="fas fa-paw"></i>
+                            <?php endif; ?>
+                        </div>
 
-            <div class="stat-card pending">
-                <div class="stat-content">
-                    <div class="stat-info">
-                        <h3>Pending Reviews</h3>
-                        <div class="stat-number"><?php echo $pending_count; ?></div>
-                    </div>
-                    <div class="stat-icon">
-                        <i class="fas fa-clock"></i>
-                    </div>
-                </div>
-            </div>
+                        <div class="application-info">
+                            <div class="pet-name"><?php echo htmlspecialchars($app['pet_name']); ?></div>
+                            <div class="pet-details">
+                                <?php echo htmlspecialchars($app['category_name']); ?> •
+                                <?php echo $app['age']; ?> years old •
+                                <?php echo ucfirst($app['gender']); ?>
+                            </div>
+                            <div class="application-meta">
+                                <i class="fas fa-home"></i>
+                                <?php echo htmlspecialchars($app['shelter_name']); ?> •
+                                Applied <?php echo $app['days_ago']; ?>
+                                day<?php echo $app['days_ago'] != 1 ? 's' : ''; ?> ago
+                            </div>
+                        </div>
 
-            <div class="stat-card approved">
-                <div class="stat-content">
-                    <div class="stat-info">
-                        <h3>Approved Applications</h3>
-                        <div class="stat-number"><?php echo $approved_count; ?></div>
+                        <div class="status-badge status-<?php echo $app['application_status']; ?>">
+                            <i class="fas fa-<?php 
+                                        echo $app['application_status'] == 'pending' ? 'clock' : 
+                                             ($app['application_status'] == 'approved' ? 'check' : 'times'); 
+                                    ?>"></i>
+                            <?php echo ucfirst($app['application_status']); ?>
+                        </div>
                     </div>
-                    <div class="stat-icon">
-                        <i class="fas fa-check-circle"></i>
-                    </div>
-                </div>
-            </div>
+                    <?php endforeach; ?>
 
-            <div class="stat-card adoptions">
-                <div class="stat-content">
-                    <div class="stat-info">
-                        <h3>Successful Adoptions</h3>
-                        <div class="stat-number"><?php echo $adoptions_count; ?></div>
+                    <div style="text-align: center; margin-top: 20px;">
+                        <a href="myAdoptions.php" class="btn btn-outline">
+                            <i class="fas fa-list"></i>
+                            View All Applications
+                        </a>
                     </div>
-                    <div class="stat-icon">
-                        <i class="fas fa-heart"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Recent Applications -->
-        <div class="section animate">
-            <div class="section-header">
-                <h2 class="section-title">
-                    <i class="fas fa-file-alt"></i>
-                    Recent Applications
-                </h2>
-                <a href="<?php echo $BASE_URL; ?>adopter/myAdoptions.php" class="section-link">
-                    View All <i class="fas fa-arrow-right"></i>
-                </a>
-            </div>
-            <div class="section-content">
-                <div class="empty-state">
-                    <div class="empty-icon">
-                        <i class="fas fa-file-alt"></i>
-                    </div>
-                    <h3 class="empty-title">No Applications Yet</h3>
-                    <p class="empty-text">
-                        You haven't submitted any adoption applications yet. Start browsing our available pets to find
-                        your perfect companion!
-                    </p>
-                    <a href="<?php echo $BASE_URL; ?>adopter/browsePets.php" class="btn btn-primary">
-                        <i class="fas fa-search"></i>
-                        Browse Available Pets
-                    </a>
-                </div>
-            </div>
-        </div>
-
-        <!-- Quick Actions -->
-        <div class="section animate">
-            <div class="section-header">
-                <h2 class="section-title">
-                    <i class="fas fa-bolt"></i>
-                    Quick Actions
-                </h2>
-            </div>
-            <div class="section-content">
-                <div class="quick-actions">
-                    <div class="action-card find"
-                        onclick="window.location.href='<?php echo $BASE_URL; ?>adopter/browsePets.php'">
-                        <div class="action-icon">
+                    <?php else: ?>
+                    <div class="empty-state">
+                        <i class="fas fa-file-alt empty-state-icon"></i>
+                        <h4>No Applications Yet</h4>
+                        <p>Start your adoption journey by browsing available pets!</p>
+                        <a href="browsePets.php" class="btn btn-primary" style="margin-top: 15px;">
                             <i class="fas fa-search"></i>
-                        </div>
-                        <h3 class="action-title">Find a Pet</h3>
-                        <p class="action-text">Browse through our available pets and find your perfect companion</p>
-                        <a href="<?php echo $BASE_URL; ?>adopter/browsePets.php" class="btn btn-primary">
-                            Browse Now
+                            Browse Pets
                         </a>
                     </div>
+                    <?php endif; ?>
+                </div>
+            </div>
 
-                    <div class="action-card track"
-                        onclick="window.location.href='<?php echo $BASE_URL; ?>adopter/myAdoptions.php'">
-                        <div class="action-icon">
-                            <i class="fas fa-file-alt"></i>
-                        </div>
-                        <h3 class="action-title">Track Applications</h3>
-                        <p class="action-text">Check the status of your adoption applications and follow up</p>
-                        <a href="<?php echo $BASE_URL; ?>adopter/myAdoptions.php" class="btn btn-primary"
-                            style="background: #f39c12;">
-                            View Applications
-                        </a>
+            <!-- Sidebar -->
+            <div>
+                <!-- Quick Actions -->
+                <div class="content-section fade-in" style="margin-bottom: 20px;">
+                    <div class="section-header">
+                        <h3>
+                            <i class="fas fa-bolt"></i>
+                            Quick Actions
+                        </h3>
                     </div>
+                    <div class="section-body">
+                        <div class="quick-actions">
+                            <a href="browsePets.php" class="quick-action">
+                                <i class="fas fa-search quick-action-icon"></i>
+                                <div>
+                                    <div style="font-weight: 600;">Browse Pets</div>
+                                    <div style="font-size: 0.85rem; opacity: 0.8;">Find your perfect companion</div>
+                                </div>
+                            </a>
 
-                    <div class="action-card guides"
-                        onclick="window.location.href='<?php echo $BASE_URL; ?>adopter/careGuides.php'">
-                        <div class="action-icon">
-                            <i class="fas fa-book"></i>
-                        </div>
-                        <h3 class="action-title">Pet Care Guides</h3>
-                        <p class="action-text">Learn how to properly care for your new furry family member</p>
-                        <a href="<?php echo $BASE_URL; ?>adopter/careGuides.php" class="btn btn-primary"
-                            style="background: #27ae60;">
-                            Read Guides
-                        </a>
-                    </div>
+                            <a href="myAdoptions.php" class="quick-action">
+                                <i class="fas fa-heart quick-action-icon"></i>
+                                <div>
+                                    <div style="font-weight: 600;">My Adoptions</div>
+                                    <div style="font-size: 0.85rem; opacity: 0.8;">Track your applications</div>
+                                </div>
+                            </a>
 
-                    <div class="action-card help" onclick="window.location.href='<?php echo $BASE_URL; ?>contact.php'">
-                        <div class="action-icon">
-                            <i class="fas fa-phone"></i>
+                            <a href="careGuides.php" class="quick-action">
+                                <i class="fas fa-book-open quick-action-icon"></i>
+                                <div>
+                                    <div style="font-weight: 600;">Care Guides</div>
+                                    <div style="font-size: 0.85rem; opacity: 0.8;">Learn pet care tips</div>
+                                </div>
+                            </a>
                         </div>
-                        <h3 class="action-title">Get Help</h3>
-                        <p class="action-text">Need assistance with the adoption process? Contact our support team</p>
-                        <a href="<?php echo $BASE_URL; ?>contact.php" class="btn btn-primary"
-                            style="background: #e74c3c;">
-                            Contact Us
-                        </a>
                     </div>
                 </div>
+
+                <!-- Reminders -->
+                <?php if (!empty($upcoming_reminders)): ?>
+                <div class="content-section fade-in">
+                    <div class="section-header">
+                        <h3>
+                            <i class="fas fa-bell"></i>
+                            Reminders
+                        </h3>
+                    </div>
+                    <div class="section-body">
+                        <?php foreach ($upcoming_reminders as $reminder): ?>
+                        <div class="reminder-item">
+                            <i class="fas fa-bell reminder-icon"></i>
+                            <div class="reminder-content">
+                                <strong><?php echo htmlspecialchars($reminder['message']); ?></strong>
+                            </div>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endif; ?>
             </div>
         </div>
 
-        <!-- Adoption Tips -->
-        <div class="section animate">
+        <!-- Recommended Pets Section -->
+        <?php if (!empty($recommended_pets)): ?>
+        <div class="content-section fade-in">
             <div class="section-header">
-                <h2 class="section-title">
-                    <i class="fas fa-lightbulb"></i>
-                    Adoption Tips & Advice
-                </h2>
+                <h3>
+                    <i class="fas fa-star"></i>
+                    Recommended for You
+                </h3>
             </div>
-            <div class="section-content">
-                <div class="tips-grid">
-                    <div class="tip-card home">
-                        <div class="tip-header">
-                            <i class="fas fa-home tip-icon"></i>
-                            <h4 class="tip-title">Prepare Your Home</h4>
+            <div class="section-body">
+                <div class="pet-grid">
+                    <?php foreach ($recommended_pets as $pet): ?>
+                    <div class="pet-card"
+                        onclick="window.location.href='petDetails.php?id=<?php echo $pet['pet_id']; ?>'">
+                        <div class="pet-card-image">
+                            <?php if ($pet['primary_image']): ?>
+                            <img src="../uploads/<?php echo htmlspecialchars($pet['primary_image']); ?>"
+                                alt="<?php echo htmlspecialchars($pet['pet_name']); ?>">
+                            <?php else: ?>
+                            <i class="fas fa-paw"></i>
+                            <?php endif; ?>
                         </div>
-                        <p class="tip-text">
-                            Pet-proof your home by removing hazards, setting up a comfortable space, and gathering
-                            necessary supplies like food bowls, toys, and bedding before your new pet arrives.
-                        </p>
-                    </div>
 
-                    <div class="tip-card patience">
-                        <div class="tip-header">
-                            <i class="fas fa-clock tip-icon"></i>
-                            <h4 class="tip-title">Be Patient</h4>
-                        </div>
-                        <p class="tip-text">
-                            Give your new pet time to adjust to their new environment. It may take weeks or even months
-                            for them to feel completely comfortable and show their true personality.
-                        </p>
-                    </div>
+                        <div class="pet-card-content">
+                            <div class="pet-card-title"><?php echo htmlspecialchars($pet['pet_name']); ?></div>
+                            <div class="pet-card-details">
+                                <?php echo htmlspecialchars($pet['category_name']); ?>
+                                <?php if ($pet['breed_name']): ?>
+                                • <?php echo htmlspecialchars($pet['breed_name']); ?>
+                                <?php endif; ?>
+                                <br>
+                                <?php echo $pet['age']; ?> years old • <?php echo ucfirst($pet['gender']); ?>
+                                <br>
+                                <i class="fas fa-home"></i> <?php echo htmlspecialchars($pet['shelter_name']); ?>
+                            </div>
 
-                    <div class="tip-card vet">
-                        <div class="tip-header">
-                            <i class="fas fa-user-md tip-icon"></i>
-                            <h4 class="tip-title">Find a Veterinarian</h4>
+                            <div class="pet-card-footer">
+                                <div class="adoption-fee">
+                                    $<?php echo number_format($pet['adoption_fee'], 2); ?>
+                                </div>
+                                <button class="btn btn-primary">
+                                    <i class="fas fa-heart"></i>
+                                    View Details
+                                </button>
+                            </div>
                         </div>
-                        <p class="tip-text">
-                            Locate a trusted veterinarian in your area and schedule a comprehensive check-up within the
-                            first week of bringing your new pet home to ensure they're healthy.
-                        </p>
                     </div>
+                    <?php endforeach; ?>
                 </div>
             </div>
         </div>
+        <?php endif; ?>
+
+        <!-- Adopted Pets Section -->
+        <?php if (!empty($adopted_pets)): ?>
+        <div class="content-section fade-in" style="margin-top: 30px;">
+            <div class="section-header">
+                <h3>
+                    <i class="fas fa-heart"></i>
+                    Your Adopted Pets
+                </h3>
+            </div>
+            <div class="section-body">
+                <div class="pet-grid">
+                    <?php foreach ($adopted_pets as $pet): ?>
+                    <div class="pet-card">
+                        <div class="pet-card-image">
+                            <?php if ($pet['primary_image']): ?>
+                            <img src="../uploads/<?php echo htmlspecialchars($pet['primary_image']); ?>"
+                                alt="<?php echo htmlspecialchars($pet['pet_name']); ?>">
+                            <?php else: ?>
+                            <i class="fas fa-paw"></i>
+                            <?php endif; ?>
+                        </div>
+
+                        <div class="pet-card-content">
+                            <div class="pet-card-title">
+                                <?php echo htmlspecialchars($pet['pet_name']); ?>
+                                <i class="fas fa-heart" style="color: #e74c3c; margin-left: 5px;"></i>
+                            </div>
+                            <div class="pet-card-details">
+                                <?php echo htmlspecialchars($pet['category_name']); ?> •
+                                <?php echo $pet['age']; ?> years old •
+                                <?php echo ucfirst($pet['gender']); ?>
+                                <br>
+                                <i class="fas fa-calendar"></i>
+                                Adopted <?php echo $pet['days_since_adoption']; ?>
+                                day<?php echo $pet['days_since_adoption'] != 1 ? 's' : ''; ?> ago
+                            </div>
+
+                            <div class="pet-card-footer">
+                                <div style="color: #2e7d32; font-weight: 600;">
+                                    <i class="fas fa-home"></i>
+                                    Family Member
+                                </div>
+                                <button class="btn btn-outline" onclick="window.location.href='careGuides.php'">
+                                    <i class="fas fa-book-open"></i>
+                                    Care Guide
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="footer-content">
-            <div class="footer-section">
-                <h4><i class="fas fa-paw"></i> Pet Care Guide</h4>
-                <p>Connecting loving families with pets in need of homes. Together, we're making a difference one
-                    adoption at a time.</p>
-                <div class="social-links">
-                    <a href="#"><i class="fab fa-facebook-f"></i></a>
-                    <a href="#"><i class="fab fa-twitter"></i></a>
-                    <a href="#"><i class="fab fa-instagram"></i></a>
-                </div>
-            </div>
-            <div class="footer-section">
-                <h4>Quick Links</h4>
-                <div class="footer-links">
-                    <a href="<?php echo $BASE_URL; ?>adopter/browsePets.php">Browse Pets</a>
-                    <a href="<?php echo $BASE_URL; ?>adopter/careGuides.php">Care Guides</a>
-                    <a href="<?php echo $BASE_URL; ?>about.php">About Us</a>
-                    <a href="<?php echo $BASE_URL; ?>contact.php">Contact</a>
-                </div>
-            </div>
-            <div class="footer-section">
-                <h4>Support</h4>
-                <div class="footer-links">
-                    <a href="#">Help Center</a>
-                    <a href="#">Adoption Process</a>
-                    <a href="#">FAQ</a>
-                    <a href="#">Privacy Policy</a>
-                </div>
-            </div>
-            <div class="footer-section">
-                <h4>Contact Info</h4>
-                <p><i class="fas fa-envelope"></i> support@petcareguide.com</p>
-                <p><i class="fas fa-phone"></i> (555) 123-4567</p>
-                <p><i class="fas fa-map-marker-alt"></i> 123 Pet Street, Animal City</p>
-            </div>
-        </div>
-        <div class="footer-bottom">
-            <p>&copy; <?php echo date('Y'); ?> Pet Adoption Care Guide. All rights reserved. Made with <i
-                    class="fas fa-heart" style="color: #e74c3c;"></i> for pets and their families.</p>
-        </div>
-    </footer>
 
     <script>
-    // Add animations on scroll
+    // Page loading and animations
     document.addEventListener('DOMContentLoaded', function() {
-        // Animate stats counters
-        const counters = document.querySelectorAll('.stat-number');
-        counters.forEach(counter => {
-            const target = parseInt(counter.textContent);
-            if (target > 0) {
-                let current = 0;
-                const increment = target / 30;
-                const timer = setInterval(() => {
-                    current += increment;
-                    if (current >= target) {
-                        current = target;
-                        clearInterval(timer);
-                    }
-                    counter.textContent = Math.floor(current);
+        // Add fade-in animation to elements
+        const elements = document.querySelectorAll('.fade-in');
+        elements.forEach((el, index) => {
+            setTimeout(() => {
+                el.style.opacity = '0';
+                el.style.transform = 'translateY(20px)';
+                el.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+
+                setTimeout(() => {
+                    el.style.opacity = '1';
+                    el.style.transform = 'translateY(0)';
                 }, 50);
+            }, index * 100);
+        });
+
+        // Add click effects to cards
+        const cards = document.querySelectorAll('.stat-card, .pet-card, .application-item');
+        cards.forEach(card => {
+            card.addEventListener('click', function(e) {
+                // Add ripple effect
+                const ripple = document.createElement('div');
+                const rect = this.getBoundingClientRect();
+                const size = Math.max(rect.width, rect.height);
+
+                ripple.style.cssText = `
+                        position: absolute;
+                        border-radius: 50%;
+                        background: rgba(102, 126, 234, 0.3);
+                        transform: scale(0);
+                        animation: ripple 0.6s linear;
+                        width: ${size}px;
+                        height: ${size}px;
+                        left: ${e.clientX - rect.left - size/2}px;
+                        top: ${e.clientY - rect.top - size/2}px;
+                        pointer-events: none;
+                    `;
+
+                this.style.position = 'relative';
+                this.style.overflow = 'hidden';
+                this.appendChild(ripple);
+
+                setTimeout(() => {
+                    ripple.remove();
+                }, 600);
+            });
+        });
+
+        // Auto-refresh stats every 5 minutes
+        setInterval(refreshStats, 300000);
+    });
+
+    // Add ripple animation CSS
+    const style = document.createElement('style');
+    style.textContent = `
+            @keyframes ripple {
+                to {
+                    transform: scale(4);
+                    opacity: 0;
+                }
+            }
+        `;
+    document.head.appendChild(style);
+
+    // Function to refresh statistics
+    function refreshStats() {
+        // You can implement AJAX call to refresh stats without page reload
+        console.log('Refreshing stats...');
+    }
+
+    // Add smooth scrolling for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function(e) {
+            e.preventDefault();
+            const target = document.querySelector(this.getAttribute('href'));
+            if (target) {
+                target.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                });
             }
         });
+    });
 
-        // Add hover effects
-        document.querySelectorAll('.action-card').forEach(card => {
-            card.addEventListener('click', function(e) {
-                if (e.target.tagName.toLowerCase() !== 'a') {
-                    const link = this.querySelector('a');
-                    if (link) {
-                        window.location.href = link.href;
-                    }
-                }
-            });
-        });
+    // Add keyboard navigation
+    document.addEventListener('keydown', function(e) {
+        // Press 'B' to go to Browse Pets
+        if (e.key === 'b' || e.key === 'B') {
+            if (!e.target.matches('input, textarea, select')) {
+                window.location.href = 'browsePets.php';
+            }
+        }
 
-        // Auto-hide messages
-        setTimeout(() => {
-            const messages = document.querySelectorAll('.message');
-            messages.forEach(msg => {
-                msg.style.opacity = '0';
-                setTimeout(() => msg.remove(), 300);
-            });
-        }, 5000);
+        // Press 'M' to go to My Adoptions
+        if (e.key === 'm' || e.key === 'M') {
+            if (!e.target.matches('input, textarea, select')) {
+                window.location.href = 'myAdoptions.php';
+            }
+        }
+    });
+
+    // Show keyboard shortcuts on help
+    function showKeyboardShortcuts() {
+        alert('Keyboard Shortcuts:\nB - Browse Pets\nM - My Adoptions\nG - Care Guides');
+    }
+
+    // Add help shortcut
+    document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+            e.preventDefault();
+            showKeyboardShortcuts();
+        }
     });
     </script>
-
-    <!-- Display messages -->
-    <?php if (isset($_SESSION['success_message'])): ?>
-    <div style="position: fixed; top: 20px; right: 20px; background: #27ae60; color: white; padding: 15px 20px; border-radius: 10px; z-index: 1001; box-shadow: 0 5px 15px rgba(0,0,0,0.2);"
-        class="message">
-        <i class="fas fa-check-circle"></i>
-        <?php echo htmlspecialchars($_SESSION['success_message']); unset($_SESSION['success_message']); ?>
-    </div>
-    <?php endif; ?>
-
-    <?php if (isset($_SESSION['error_message'])): ?>
-    <div style="position: fixed; top: 20px; right: 20px; background: #e74c3c; color: white; padding: 15px 20px; border-radius: 10px; z-index: 1001; box-shadow: 0 5px 15px rgba(0,0,0,0.2);"
-        class="message">
-        <i class="fas fa-exclamation-circle"></i>
-        <?php echo htmlspecialchars($_SESSION['error_message']); unset($_SESSION['error_message']); ?>
-    </div>
-    <?php endif; ?>
 </body>
 
 </html>

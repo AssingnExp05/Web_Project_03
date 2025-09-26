@@ -26,6 +26,8 @@ $page_title = 'Manage Vaccinations - Admin Dashboard';
 $vaccinations = [];
 $pets = [];
 $shelters = [];
+$total_vaccinations = 0;
+$total_pages = 1;
 $stats = [
     'total_vaccinations' => 0,
     'pending_vaccinations' => 0,
@@ -60,24 +62,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
                 case 'add_vaccination':
                     $pet_id = intval($_POST['pet_id'] ?? 0);
                     $vaccine_name = trim($_POST['vaccine_name'] ?? '');
-                    $vaccine_type = trim($_POST['vaccine_type'] ?? '');
-                    $administered_date = $_POST['administered_date'] ?? '';
+                    $vaccination_date = $_POST['vaccination_date'] ?? '';
                     $next_due_date = $_POST['next_due_date'] ?? '';
-                    $veterinarian = trim($_POST['veterinarian'] ?? '');
-                    $batch_number = trim($_POST['batch_number'] ?? '');
+                    $veterinarian_name = trim($_POST['veterinarian_name'] ?? '');
                     $notes = trim($_POST['notes'] ?? '');
                     
-                    if ($pet_id > 0 && !empty($vaccine_name) && !empty($vaccine_type)) {
+                    if ($pet_id > 0 && !empty($vaccine_name)) {
                         $stmt = $db->prepare("
-                            INSERT INTO vaccinations (pet_id, vaccine_name, vaccine_type, administered_date, next_due_date, 
-                                                    veterinarian, batch_number, notes, created_by, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                            INSERT INTO vaccinations (pet_id, vaccine_name, vaccination_date, next_due_date, 
+                                                    veterinarian_name, notes)
+                            VALUES (?, ?, ?, ?, ?, ?)
                         ");
                         
+                        $vacc_date = !empty($vaccination_date) ? $vaccination_date : null;
                         $next_due = !empty($next_due_date) ? $next_due_date : null;
-                        $admin_date = !empty($administered_date) ? $administered_date : null;
                         
-                        if ($stmt->execute([$pet_id, $vaccine_name, $vaccine_type, $admin_date, $next_due, $veterinarian, $batch_number, $notes, $user_id])) {
+                        if ($stmt->execute([$pet_id, $vaccine_name, $vacc_date, $next_due, $veterinarian_name, $notes])) {
                             echo json_encode(['success' => true, 'message' => 'Vaccination record added successfully']);
                         } else {
                             echo json_encode(['success' => false, 'message' => 'Failed to add vaccination record']);
@@ -90,25 +90,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
                 case 'update_vaccination':
                     $vaccination_id = intval($_POST['vaccination_id'] ?? 0);
                     $vaccine_name = trim($_POST['vaccine_name'] ?? '');
-                    $vaccine_type = trim($_POST['vaccine_type'] ?? '');
-                    $administered_date = $_POST['administered_date'] ?? '';
+                    $vaccination_date = $_POST['vaccination_date'] ?? '';
                     $next_due_date = $_POST['next_due_date'] ?? '';
-                    $veterinarian = trim($_POST['veterinarian'] ?? '');
-                    $batch_number = trim($_POST['batch_number'] ?? '');
+                    $veterinarian_name = trim($_POST['veterinarian_name'] ?? '');
                     $notes = trim($_POST['notes'] ?? '');
                     
-                    if ($vaccination_id > 0 && !empty($vaccine_name) && !empty($vaccine_type)) {
+                    if ($vaccination_id > 0 && !empty($vaccine_name)) {
                         $stmt = $db->prepare("
                             UPDATE vaccinations 
-                            SET vaccine_name = ?, vaccine_type = ?, administered_date = ?, next_due_date = ?,
-                                veterinarian = ?, batch_number = ?, notes = ?, updated_at = NOW()
+                            SET vaccine_name = ?, vaccination_date = ?, next_due_date = ?,
+                                veterinarian_name = ?, notes = ?
                             WHERE vaccination_id = ?
                         ");
                         
+                        $vacc_date = !empty($vaccination_date) ? $vaccination_date : null;
                         $next_due = !empty($next_due_date) ? $next_due_date : null;
-                        $admin_date = !empty($administered_date) ? $administered_date : null;
                         
-                        if ($stmt->execute([$vaccine_name, $vaccine_type, $admin_date, $next_due, $veterinarian, $batch_number, $notes, $vaccination_id])) {
+                        if ($stmt->execute([$vaccine_name, $vacc_date, $next_due, $veterinarian_name, $notes, $vaccination_id])) {
                             echo json_encode(['success' => true, 'message' => 'Vaccination record updated successfully']);
                         } else {
                             echo json_encode(['success' => false, 'message' => 'Failed to update vaccination record']);
@@ -133,16 +131,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_W
                     }
                     break;
                     
-                case 'get_pets_by_shelter':
-                    $shelter_id = intval($_POST['shelter_id'] ?? 0);
+                case 'get_vaccination_details':
+                    $vaccination_id = intval($_POST['vaccination_id'] ?? 0);
                     
-                    if ($shelter_id > 0) {
-                        $stmt = $db->prepare("SELECT pet_id, name, species, breed FROM pets WHERE shelter_id = ? ORDER BY name");
-                        $stmt->execute([$shelter_id]);
-                        $pets_list = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                        echo json_encode(['success' => true, 'pets' => $pets_list]);
+                    if ($vaccination_id > 0) {
+                        $stmt = $db->prepare("
+                            SELECT v.*, p.pet_name, pc.category_name, pb.breed_name, s.shelter_name
+                            FROM vaccinations v
+                            LEFT JOIN pets p ON v.pet_id = p.pet_id
+                            LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
+                            LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
+                            LEFT JOIN shelters s ON p.shelter_id = s.shelter_id
+                            WHERE v.vaccination_id = ?
+                        ");
+                        $stmt->execute([$vaccination_id]);
+                        $vaccination = $stmt->fetch(PDO::FETCH_ASSOC);
+                        
+                        if ($vaccination) {
+                            echo json_encode(['success' => true, 'vaccination' => $vaccination]);
+                        } else {
+                            echo json_encode(['success' => false, 'message' => 'Vaccination not found']);
+                        }
                     } else {
-                        echo json_encode(['success' => false, 'message' => 'Invalid shelter ID']);
+                        echo json_encode(['success' => false, 'message' => 'Invalid vaccination ID']);
                     }
                     break;
                     
@@ -169,55 +180,55 @@ try {
             // Total vaccinations
             $stmt = $db->prepare("SELECT COUNT(*) as count FROM vaccinations");
             $stmt->execute();
-            $result = $stmt->fetch();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
             $stats['total_vaccinations'] = $result ? (int)$result['count'] : 0;
             
-            // Pending vaccinations (next due date is in the future and no administered date)
-            $stmt = $db->prepare("
-                SELECT COUNT(*) as count FROM vaccinations 
-                WHERE administered_date IS NULL AND next_due_date >= CURDATE()
-            ");
+            // Completed vaccinations (have vaccination date)
+            $stmt = $db->prepare("SELECT COUNT(*) as count FROM vaccinations WHERE vaccination_date IS NOT NULL");
             $stmt->execute();
-            $result = $stmt->fetch();
-            $stats['pending_vaccinations'] = $result ? (int)$result['count'] : 0;
-            
-            // Completed vaccinations
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM vaccinations WHERE administered_date IS NOT NULL");
-            $stmt->execute();
-            $result = $stmt->fetch();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
             $stats['completed_vaccinations'] = $result ? (int)$result['count'] : 0;
             
-            // Overdue vaccinations
+            // Pending vaccinations (no vaccination date but have next due date in future)
             $stmt = $db->prepare("
                 SELECT COUNT(*) as count FROM vaccinations 
-                WHERE administered_date IS NULL AND next_due_date < CURDATE()
+                WHERE vaccination_date IS NULL AND next_due_date >= CURDATE()
             ");
             $stmt->execute();
-            $result = $stmt->fetch();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stats['pending_vaccinations'] = $result ? (int)$result['count'] : 0;
+            
+            // Overdue vaccinations (no vaccination date and next due date is past)
+            $stmt = $db->prepare("
+                SELECT COUNT(*) as count FROM vaccinations 
+                WHERE vaccination_date IS NULL AND next_due_date < CURDATE()
+            ");
+            $stmt->execute();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
             $stats['overdue_vaccinations'] = $result ? (int)$result['count'] : 0;
             
             // This month vaccinations
             $stmt = $db->prepare("
                 SELECT COUNT(*) as count FROM vaccinations 
-                WHERE MONTH(administered_date) = MONTH(CURDATE()) 
-                AND YEAR(administered_date) = YEAR(CURDATE())
+                WHERE MONTH(vaccination_date) = MONTH(CURDATE()) 
+                AND YEAR(vaccination_date) = YEAR(CURDATE())
             ");
             $stmt->execute();
-            $result = $stmt->fetch();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
             $stats['this_month_vaccinations'] = $result ? (int)$result['count'] : 0;
             
             // Upcoming vaccinations (next 30 days)
             $stmt = $db->prepare("
                 SELECT COUNT(*) as count FROM vaccinations 
                 WHERE next_due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-                AND administered_date IS NULL
+                AND vaccination_date IS NULL
             ");
             $stmt->execute();
-            $result = $stmt->fetch();
+            $result = $stmt->fetch(PDO::FETCH_ASSOC);
             $stats['upcoming_vaccinations'] = $result ? (int)$result['count'] : 0;
             
         } catch (Exception $e) {
-            // Handle silently
+            error_log("Stats error: " . $e->getMessage());
         }
         
         // Get shelters for filter dropdown
@@ -235,16 +246,16 @@ try {
         
         if (!empty($filter_status)) {
             if ($filter_status === 'completed') {
-                $where_conditions[] = "v.administered_date IS NOT NULL";
+                $where_conditions[] = "v.vaccination_date IS NOT NULL";
             } elseif ($filter_status === 'pending') {
-                $where_conditions[] = "v.administered_date IS NULL AND v.next_due_date >= CURDATE()";
+                $where_conditions[] = "v.vaccination_date IS NULL AND v.next_due_date >= CURDATE()";
             } elseif ($filter_status === 'overdue') {
-                $where_conditions[] = "v.administered_date IS NULL AND v.next_due_date < CURDATE()";
+                $where_conditions[] = "v.vaccination_date IS NULL AND v.next_due_date < CURDATE()";
             }
         }
         
         if (!empty($filter_shelter)) {
-            $where_conditions[] = "p.shelter_id = ?";
+            $where_conditions[] = "s.shelter_id = ?";
             $params[] = $filter_shelter;
         }
         
@@ -253,28 +264,23 @@ try {
             $params[] = $filter_pet;
         }
         
-        if (!empty($filter_vaccine_type)) {
-            $where_conditions[] = "v.vaccine_type = ?";
-            $params[] = $filter_vaccine_type;
-        }
-        
         if (!empty($filter_date_from)) {
-            $where_conditions[] = "DATE(COALESCE(v.administered_date, v.next_due_date)) >= ?";
+            $where_conditions[] = "DATE(COALESCE(v.vaccination_date, v.next_due_date)) >= ?";
             $params[] = $filter_date_from;
         }
         
         if (!empty($filter_date_to)) {
-            $where_conditions[] = "DATE(COALESCE(v.administered_date, v.next_due_date)) <= ?";
+            $where_conditions[] = "DATE(COALESCE(v.vaccination_date, v.next_due_date)) <= ?";
             $params[] = $filter_date_to;
         }
         
         if (!empty($search_query)) {
-            $where_conditions[] = "(p.name LIKE ? OR v.vaccine_name LIKE ? OR v.vaccine_type LIKE ? OR v.veterinarian LIKE ? OR s.shelter_name LIKE ?)";
-            $params[] = "%$search_query%";
-            $params[] = "%$search_query%";
-            $params[] = "%$search_query%";
-            $params[] = "%$search_query%";
-            $params[] = "%$search_query%";
+            $where_conditions[] = "(p.pet_name LIKE ? OR v.vaccine_name LIKE ? OR v.veterinarian_name LIKE ? OR s.shelter_name LIKE ?)";
+            $search_term = "%$search_query%";
+            $params[] = $search_term;
+            $params[] = $search_term;
+            $params[] = $search_term;
+            $params[] = $search_term;
         }
         
         $where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
@@ -289,34 +295,36 @@ try {
         ";
         $stmt = $db->prepare($count_query);
         $stmt->execute($params);
-        $total_vaccinations = $stmt->fetch()['total'] ?? 0;
-        $total_pages = ceil($total_vaccinations / $per_page);
+        $count_result = $stmt->fetch(PDO::FETCH_ASSOC);
+        $total_vaccinations = $count_result ? (int)$count_result['total'] : 0;
+        $total_pages = max(1, ceil($total_vaccinations / $per_page));
         
         // Get vaccinations with pagination
         try {
             $vaccinations_query = "
                 SELECT v.*, 
-                       p.name as pet_name, p.species, p.breed, p.age, p.photo_url,
-                       s.shelter_name, s.contact_email as shelter_email,
-                       admin_u.first_name as admin_first_name, admin_u.last_name as admin_last_name,
+                       p.pet_name, p.age, p.gender, p.primary_image,
+                       pc.category_name, pb.breed_name,
+                       s.shelter_name,
                        CASE 
-                           WHEN v.administered_date IS NOT NULL THEN 'completed'
-                           WHEN v.administered_date IS NULL AND v.next_due_date >= CURDATE() THEN 'pending'
-                           WHEN v.administered_date IS NULL AND v.next_due_date < CURDATE() THEN 'overdue'
+                           WHEN v.vaccination_date IS NOT NULL THEN 'completed'
+                           WHEN v.vaccination_date IS NULL AND v.next_due_date >= CURDATE() THEN 'pending'
+                           WHEN v.vaccination_date IS NULL AND v.next_due_date < CURDATE() THEN 'overdue'
                            ELSE 'unknown'
                        END as vaccination_status
                 FROM vaccinations v
                 LEFT JOIN pets p ON v.pet_id = p.pet_id
+                LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
+                LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
                 LEFT JOIN shelters s ON p.shelter_id = s.shelter_id
-                LEFT JOIN users admin_u ON v.created_by = admin_u.user_id
                 $where_clause
                 ORDER BY 
                     CASE 
-                        WHEN v.administered_date IS NULL AND v.next_due_date < CURDATE() THEN 1
-                        WHEN v.administered_date IS NULL AND v.next_due_date >= CURDATE() THEN 2
+                        WHEN v.vaccination_date IS NULL AND v.next_due_date < CURDATE() THEN 1
+                        WHEN v.vaccination_date IS NULL AND v.next_due_date >= CURDATE() THEN 2
                         ELSE 3
                     END,
-                    COALESCE(v.next_due_date, v.administered_date) DESC
+                    COALESCE(v.next_due_date, v.vaccination_date) DESC
                 LIMIT $per_page OFFSET $offset
             ";
             
@@ -324,16 +332,20 @@ try {
             $stmt->execute($params);
             $vaccinations = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         } catch (Exception $e) {
+            error_log("Vaccinations query error: " . $e->getMessage());
             $vaccinations = [];
         }
         
         // Get all pets for add vaccination form
         try {
             $stmt = $db->prepare("
-                SELECT p.pet_id, p.name, p.species, p.breed, s.shelter_name, s.shelter_id 
+                SELECT p.pet_id, p.pet_name, pc.category_name, pb.breed_name, s.shelter_name, s.shelter_id 
                 FROM pets p 
                 LEFT JOIN shelters s ON p.shelter_id = s.shelter_id 
-                ORDER BY s.shelter_name, p.name
+                LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
+                LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
+                WHERE p.status IN ('available', 'pending')
+                ORDER BY s.shelter_name, p.pet_name
             ");
             $stmt->execute();
             $pets = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -345,8 +357,12 @@ try {
     error_log("Manage Vaccinations database error: " . $e->getMessage());
 }
 
-// Get vaccine types for filter
-$vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initial'];
+// Common vaccine names for quick selection
+$common_vaccines = [
+    'Rabies', 'DHPP (Distemper, Hepatitis, Parvovirus, Parainfluenza)', 
+    'Bordetella', 'Lyme Disease', 'FVRCP (Feline Viral Rhinotracheitis, Calicivirus, Panleukopenia)',
+    'FeLV (Feline Leukemia)', 'FIV (Feline Immunodeficiency Virus)'
+];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1002,33 +1018,6 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
         }
     }
 
-    /* Loading States */
-    .loading {
-        opacity: 0.6;
-        pointer-events: none;
-    }
-
-    .spinner {
-        border: 2px solid #f3f3f3;
-        border-top: 2px solid #17a2b8;
-        border-radius: 50%;
-        width: 20px;
-        height: 20px;
-        animation: spin 1s linear infinite;
-        display: inline-block;
-        margin-left: 10px;
-    }
-
-    @keyframes spin {
-        0% {
-            transform: rotate(0deg);
-        }
-
-        100% {
-            transform: rotate(360deg);
-        }
-    }
-
     /* Animations */
     @keyframes fadeIn {
         from {
@@ -1233,19 +1222,6 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
                     </div>
 
                     <div class="filter-group">
-                        <label>Vaccine Type</label>
-                        <select name="vaccine_type" onchange="document.getElementById('filtersForm').submit()">
-                            <option value="">All Types</option>
-                            <?php foreach ($vaccine_types as $type): ?>
-                            <option value="<?php echo $type; ?>"
-                                <?php echo $filter_vaccine_type === $type ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($type); ?>
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-
-                    <div class="filter-group">
                         <label>Date From</label>
                         <input type="date" name="date_from" value="<?php echo htmlspecialchars($filter_date_from); ?>">
                     </div>
@@ -1291,7 +1267,7 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
                 </h2>
                 <div style="display: flex; gap: 10px;">
                     <span style="font-size: 0.9rem; color: #666;">
-                        Page <?php echo $page; ?> of <?php echo max(1, $total_pages); ?>
+                        Page <?php echo $page; ?> of <?php echo $total_pages; ?>
                     </span>
                 </div>
             </div>
@@ -1304,13 +1280,13 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
                 </div>
                 <h3 class="empty-title">No Vaccination Records Found</h3>
                 <p class="empty-text">
-                    <?php if (!empty($filter_status) || !empty($search_query) || !empty($filter_shelter) || !empty($filter_vaccine_type)): ?>
+                    <?php if (!empty($filter_status) || !empty($search_query) || !empty($filter_shelter)): ?>
                     No vaccination records match your current filters. Try adjusting your search criteria.
                     <?php else: ?>
                     There are no vaccination records in the system yet.
                     <?php endif; ?>
                 </p>
-                <?php if (!empty($filter_status) || !empty($search_query) || !empty($filter_shelter) || !empty($filter_vaccine_type)): ?>
+                <?php if (!empty($filter_status) || !empty($search_query) || !empty($filter_shelter)): ?>
                 <a href="<?php echo $BASE_URL; ?>admin/manageVaccinations.php" class="btn btn-primary">
                     <i class="fas fa-eye"></i> View All Records
                 </a>
@@ -1340,8 +1316,8 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
                         <tr data-vaccination-id="<?php echo $vaccination['vaccination_id']; ?>">
                             <td>
                                 <div class="pet-info">
-                                    <?php if (!empty($vaccination['photo_url'])): ?>
-                                    <img src="<?php echo $BASE_URL; ?>uploads/<?php echo htmlspecialchars($vaccination['photo_url']); ?>"
+                                    <?php if (!empty($vaccination['primary_image'])): ?>
+                                    <img src="<?php echo $BASE_URL; ?>uploads/<?php echo htmlspecialchars($vaccination['primary_image']); ?>"
                                         alt="<?php echo htmlspecialchars($vaccination['pet_name']); ?>"
                                         class="pet-photo">
                                     <?php else: ?>
@@ -1351,27 +1327,24 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
                                     </div>
                                     <?php endif; ?>
                                     <div class="pet-details">
-                                        <h4><?php echo htmlspecialchars($vaccination['pet_name']); ?></h4>
+                                        <h4><?php echo htmlspecialchars($vaccination['pet_name'] ?? 'Unknown Pet'); ?>
+                                        </h4>
                                         <div class="pet-meta">
                                             <div><i class="fas fa-info-circle"></i>
-                                                <?php echo htmlspecialchars($vaccination['species'] . ' • ' . $vaccination['breed']); ?>
+                                                <?php echo htmlspecialchars(($vaccination['category_name'] ?? 'Unknown') . ' • ' . ($vaccination['breed_name'] ?? 'Mixed')); ?>
                                             </div>
                                             <div><i class="fas fa-birthday-cake"></i>
-                                                <?php echo htmlspecialchars($vaccination['age']); ?> years old</div>
+                                                <?php echo htmlspecialchars($vaccination['age'] ?? 'Unknown'); ?> years
+                                                old</div>
                                         </div>
                                     </div>
                                 </div>
                             </td>
                             <td>
                                 <div class="vaccine-info">
-                                    <h4><?php echo htmlspecialchars($vaccination['vaccine_name']); ?></h4>
+                                    <h4><?php echo htmlspecialchars($vaccination['vaccine_name'] ?? 'Unknown Vaccine'); ?>
+                                    </h4>
                                     <div class="vaccine-meta">
-                                        <div><i class="fas fa-tags"></i> Type:
-                                            <?php echo htmlspecialchars($vaccination['vaccine_type']); ?></div>
-                                        <?php if (!empty($vaccination['batch_number'])): ?>
-                                        <div><i class="fas fa-barcode"></i> Batch:
-                                            <?php echo htmlspecialchars($vaccination['batch_number']); ?></div>
-                                        <?php endif; ?>
                                         <?php if (!empty($vaccination['notes'])): ?>
                                         <div style="margin-top: 5px; font-size: 0.75rem; color: #666;">
                                             <i class="fas fa-sticky-note"></i>
@@ -1383,17 +1356,17 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
                             </td>
                             <td>
                                 <div style="font-size: 0.85rem;">
-                                    <?php if (!empty($vaccination['administered_date'])): ?>
+                                    <?php if (!empty($vaccination['vaccination_date'])): ?>
                                     <div style="margin-bottom: 5px;">
                                         <strong style="color: #28a745;">Administered:</strong><br>
                                         <span
-                                            style="color: #2c3e50;"><?php echo date('M j, Y', strtotime($vaccination['administered_date'])); ?></span>
+                                            style="color: #2c3e50;"><?php echo date('M j, Y', strtotime($vaccination['vaccination_date'])); ?></span>
                                     </div>
                                     <?php endif; ?>
                                     <?php if (!empty($vaccination['next_due_date'])): ?>
                                     <div>
                                         <strong
-                                            style="color: <?php echo strtotime($vaccination['next_due_date']) < time() && empty($vaccination['administered_date']) ? '#dc3545' : '#17a2b8'; ?>;">Next
+                                            style="color: <?php echo strtotime($vaccination['next_due_date']) < time() && empty($vaccination['vaccination_date']) ? '#dc3545' : '#17a2b8'; ?>;">Next
                                             Due:</strong><br>
                                         <span
                                             style="color: #2c3e50;"><?php echo date('M j, Y', strtotime($vaccination['next_due_date'])); ?></span>
@@ -1403,60 +1376,50 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
                             </td>
                             <td>
                                 <div style="font-size: 0.9rem;">
-                                    <?php if (!empty($vaccination['veterinarian'])): ?>
+                                    <?php if (!empty($vaccination['veterinarian_name'])): ?>
                                     <div style="font-weight: 600; color: #2c3e50;">
                                         <i class="fas fa-user-md"></i>
-                                        <?php echo htmlspecialchars($vaccination['veterinarian']); ?>
+                                        <?php echo htmlspecialchars($vaccination['veterinarian_name']); ?>
                                     </div>
                                     <?php else: ?>
                                     <span style="color: #999; font-size: 0.8rem;">Not specified</span>
                                     <?php endif; ?>
-                                    <div style="color: #666; font-size: 0.75rem; margin-top: 5px;">
-                                        <i class="fas fa-user"></i> Added by:
-                                        <?php echo htmlspecialchars($vaccination['admin_first_name'] . ' ' . $vaccination['admin_last_name']); ?>
-                                    </div>
                                 </div>
                             </td>
                             <td>
                                 <?php
-                                        $status_class = $vaccination['vaccination_status'];
-                                        $status_icon = [
-                                            'completed' => 'check-circle',
-                                            'pending' => 'hourglass-half',
-                                            'overdue' => 'exclamation-triangle'
-                                        ][$status_class] ?? 'question-circle';
-                                        ?>
+                                    $status_class = $vaccination['vaccination_status'] ?? 'unknown';
+                                    $status_icon = [
+                                        'completed' => 'check-circle',
+                                        'pending' => 'hourglass-half',
+                                        'overdue' => 'exclamation-triangle'
+                                    ][$status_class] ?? 'question-circle';
+                                ?>
                                 <span class="status-badge status-<?php echo $status_class; ?>">
                                     <i class="fas fa-<?php echo $status_icon; ?>"></i>
                                     <?php echo ucfirst($status_class); ?>
                                 </span>
-                                <?php if ($status_class === 'overdue'): ?>
+                                <?php if ($status_class === 'overdue' && !empty($vaccination['next_due_date'])): ?>
                                 <div style="font-size: 0.7rem; color: #dc3545; margin-top: 4px;">
                                     <?php 
-                                                $days_overdue = floor((time() - strtotime($vaccination['next_due_date'])) / (60*60*24));
-                                                echo $days_overdue . ' days overdue';
-                                                ?>
+                                        $days_overdue = floor((time() - strtotime($vaccination['next_due_date'])) / (60*60*24));
+                                        echo $days_overdue . ' days overdue';
+                                    ?>
                                 </div>
                                 <?php elseif ($status_class === 'pending' && !empty($vaccination['next_due_date'])): ?>
                                 <div style="font-size: 0.7rem; color: #ffc107; margin-top: 4px;">
                                     <?php 
-                                                $days_until = floor((strtotime($vaccination['next_due_date']) - time()) / (60*60*24));
-                                                echo $days_until . ' days remaining';
-                                                ?>
+                                        $days_until = floor((strtotime($vaccination['next_due_date']) - time()) / (60*60*24));
+                                        echo max(0, $days_until) . ' days remaining';
+                                    ?>
                                 </div>
                                 <?php endif; ?>
                             </td>
                             <td>
                                 <div style="font-size: 0.9rem;">
                                     <div style="font-weight: 600; color: #2c3e50;">
-                                        <?php echo htmlspecialchars($vaccination['shelter_name']); ?>
+                                        <?php echo htmlspecialchars($vaccination['shelter_name'] ?? 'Unknown Shelter'); ?>
                                     </div>
-                                    <?php if (!empty($vaccination['shelter_email'])): ?>
-                                    <div style="color: #666; font-size: 0.8rem;">
-                                        <i class="fas fa-envelope"></i>
-                                        <?php echo htmlspecialchars($vaccination['shelter_email']); ?>
-                                    </div>
-                                    <?php endif; ?>
                                 </div>
                             </td>
                             <td>
@@ -1470,7 +1433,7 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
                                         <i class="fas fa-edit"></i> Edit
                                     </button>
                                     <button class="btn btn-danger btn-sm"
-                                        onclick="confirmDeleteVaccination(<?php echo $vaccination['vaccination_id']; ?>, '<?php echo htmlspecialchars($vaccination['vaccine_name'] . ' - ' . $vaccination['pet_name'], ENT_QUOTES); ?>')">
+                                        onclick="confirmDeleteVaccination(<?php echo $vaccination['vaccination_id']; ?>, '<?php echo htmlspecialchars(($vaccination['vaccine_name'] ?? 'Unknown') . ' - ' . ($vaccination['pet_name'] ?? 'Unknown Pet'), ENT_QUOTES); ?>')">
                                         <i class="fas fa-trash"></i> Delete
                                     </button>
                                 </div>
@@ -1501,10 +1464,10 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
                     <?php endif; ?>
 
                     <?php
-                            $start = max(1, $page - 2);
-                            $end = min($total_pages, $page + 2);
-                            
-                            if ($start > 1): ?>
+                        $start = max(1, $page - 2);
+                        $end = min($total_pages, $page + 2);
+                        
+                        if ($start > 1): ?>
                     <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => 1])); ?>">1</a>
                     <?php if ($start > 2): ?>
                     <span>...</span>
@@ -1563,14 +1526,14 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
                                 <?php 
                                 $current_shelter = '';
                                 foreach ($pets as $pet): 
-                                    if ($current_shelter !== $pet['shelter_name']):
+                                    if ($current_shelter !== ($pet['shelter_name'] ?? 'Unknown')):
                                         if ($current_shelter !== '') echo '</optgroup>';
-                                        echo '<optgroup label="' . htmlspecialchars($pet['shelter_name']) . '">';
-                                        $current_shelter = $pet['shelter_name'];
+                                        echo '<optgroup label="' . htmlspecialchars($pet['shelter_name'] ?? 'Unknown Shelter') . '">';
+                                        $current_shelter = $pet['shelter_name'] ?? 'Unknown';
                                     endif;
                                 ?>
                                 <option value="<?php echo $pet['pet_id']; ?>">
-                                    <?php echo htmlspecialchars($pet['name'] . ' - ' . $pet['species'] . ' (' . $pet['breed'] . ')'); ?>
+                                    <?php echo htmlspecialchars(($pet['pet_name'] ?? 'Unknown') . ' - ' . ($pet['category_name'] ?? 'Unknown') . ' (' . ($pet['breed_name'] ?? 'Mixed') . ')'); ?>
                                 </option>
                                 <?php endforeach; ?>
                                 <?php if ($current_shelter !== '') echo '</optgroup>'; ?>
@@ -1579,32 +1542,20 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
 
                         <div class="form-group required">
                             <label for="vaccineName">Vaccine Name</label>
-                            <input type="text" id="vaccineName" name="vaccine_name"
-                                placeholder="e.g., Rabies, DHPP, Bordetella" required>
-                        </div>
-                    </div>
-
-                    <div class="form-grid">
-                        <div class="form-group required">
-                            <label for="vaccineType">Vaccine Type</label>
-                            <select id="vaccineType" name="vaccine_type" required>
-                                <option value="">Select type...</option>
-                                <?php foreach ($vaccine_types as $type): ?>
-                                <option value="<?php echo $type; ?>"><?php echo htmlspecialchars($type); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="veterinarian">Veterinarian</label>
-                            <input type="text" id="veterinarian" name="veterinarian" placeholder="Dr. Name or Clinic">
+                            <input type="text" id="vaccineName" name="vaccine_name" list="commonVaccines"
+                                placeholder="e.g., Rabies, DHPP, FVRCP" required>
+                            <datalist id="commonVaccines">
+                                <?php foreach ($common_vaccines as $vaccine): ?>
+                                <option value="<?php echo htmlspecialchars($vaccine); ?>">
+                                    <?php endforeach; ?>
+                            </datalist>
                         </div>
                     </div>
 
                     <div class="form-grid">
                         <div class="form-group">
-                            <label for="administeredDate">Administered Date</label>
-                            <input type="date" id="administeredDate" name="administered_date">
+                            <label for="vaccinationDate">Vaccination Date</label>
+                            <input type="date" id="vaccinationDate" name="vaccination_date">
                         </div>
 
                         <div class="form-group">
@@ -1614,8 +1565,9 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
                     </div>
 
                     <div class="form-group">
-                        <label for="batchNumber">Batch Number</label>
-                        <input type="text" id="batchNumber" name="batch_number" placeholder="Vaccine batch/lot number">
+                        <label for="veterinarianName">Veterinarian Name</label>
+                        <input type="text" id="veterinarianName" name="veterinarian_name"
+                            placeholder="Dr. Name or Clinic Name">
                     </div>
 
                     <div class="form-group">
@@ -1734,12 +1686,38 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
         document.getElementById('actionType').value = 'update_vaccination';
         document.getElementById('vaccinationId').value = vaccinationId;
 
-        // Get vaccination data and populate form
-        const row = document.querySelector(`tr[data-vaccination-id="${vaccinationId}"]`);
-        if (row) {
-            // This is a simplified approach - in a real app, you'd fetch complete data via AJAX
-            document.getElementById('vaccinationModal').style.display = 'block';
-        }
+        // Fetch vaccination details via AJAX
+        const formData = new FormData();
+        formData.append('action', 'get_vaccination_details');
+        formData.append('vaccination_id', vaccinationId);
+
+        fetch(window.location.href, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const vaccination = data.vaccination;
+                    document.getElementById('petSelect').value = vaccination.pet_id || '';
+                    document.getElementById('vaccineName').value = vaccination.vaccine_name || '';
+                    document.getElementById('vaccinationDate').value = vaccination.vaccination_date || '';
+                    document.getElementById('nextDueDate').value = vaccination.next_due_date || '';
+                    document.getElementById('veterinarianName').value = vaccination.veterinarian_name || '';
+                    document.getElementById('notes').value = vaccination.notes || '';
+
+                    document.getElementById('vaccinationModal').style.display = 'block';
+                } else {
+                    showMessage('Failed to load vaccination details', 'error');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showMessage('Error loading vaccination details', 'error');
+            });
     }
 
     // View vaccination details
@@ -1751,47 +1729,57 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
             '<div style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
         document.getElementById('viewModal').style.display = 'block';
 
-        // Get vaccination details from table row (simplified approach)
-        const row = document.querySelector(`tr[data-vaccination-id="${vaccinationId}"]`);
-        if (row) {
-            // Create detailed view from table data
-            const petInfo = row.cells[0].textContent.trim();
-            const vaccineInfo = row.cells[1].textContent.trim();
-            const dates = row.cells[2].textContent.trim();
-            const vet = row.cells[3].textContent.trim();
-            const status = row.cells[4].textContent.trim();
-            const shelter = row.cells[5].textContent.trim();
+        // Fetch vaccination details
+        const formData = new FormData();
+        formData.append('action', 'get_vaccination_details');
+        formData.append('vaccination_id', vaccinationId);
 
-            const detailsHtml = `
-                    <div style="display: grid; gap: 15px;">
-                        <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                            <h4 style="margin-bottom: 10px; color: #2c3e50;">Pet Information</h4>
-                            <p style="margin: 0; white-space: pre-line;">${petInfo}</p>
+        fetch(window.location.href, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    const vaccination = data.vaccination;
+                    const detailsHtml = `
+                        <div style="display: grid; gap: 15px;">
+                            <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                                <h4 style="margin-bottom: 10px; color: #2c3e50;">Pet Information</h4>
+                                <p style="margin: 0;"><strong>Name:</strong> ${vaccination.pet_name || 'Unknown'}</p>
+                                <p style="margin: 0;"><strong>Category:</strong> ${vaccination.category_name || 'Unknown'}</p>
+                                <p style="margin: 0;"><strong>Breed:</strong> ${vaccination.breed_name || 'Unknown'}</p>
+                                <p style="margin: 0;"><strong>Shelter:</strong> ${vaccination.shelter_name || 'Unknown'}</p>
+                            </div>
+                            <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                                <h4 style="margin-bottom: 10px; color: #2c3e50;">Vaccination Information</h4>
+                                <p style="margin: 0;"><strong>Vaccine:</strong> ${vaccination.vaccine_name || 'N/A'}</p>
+                                <p style="margin: 0;"><strong>Administered Date:</strong> ${vaccination.vaccination_date ? new Date(vaccination.vaccination_date).toLocaleDateString() : 'Not administered'}</p>
+                                <p style="margin: 0;"><strong>Next Due Date:</strong> ${vaccination.next_due_date ? new Date(vaccination.next_due_date).toLocaleDateString() : 'Not set'}</p>
+                                <p style="margin: 0;"><strong>Veterinarian:</strong> ${vaccination.veterinarian_name || 'Not specified'}</p>
+                            </div>
+                            ${vaccination.notes ? `
+                            <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
+                                <h4 style="margin-bottom: 10px; color: #2c3e50;">Notes</h4>
+                                <p style="margin: 0; white-space: pre-wrap;">${vaccination.notes}</p>
+                            </div>
+                            ` : ''}
                         </div>
-                        <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                            <h4 style="margin-bottom: 10px; color: #2c3e50;">Vaccine Information</h4>
-                            <p style="margin: 0; white-space: pre-line;">${vaccineInfo}</p>
-                        </div>
-                        <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                            <h4 style="margin-bottom: 10px; color: #2c3e50;">Dates</h4>
-                            <p style="margin: 0; white-space: pre-line;">${dates}</p>
-                        </div>
-                        <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                            <h4 style="margin-bottom: 10px; color: #2c3e50;">Veterinarian</h4>
-                            <p style="margin: 0;">${vet}</p>
-                        </div>
-                        <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                            <h4 style="margin-bottom: 10px; color: #2c3e50;">Status</h4>
-                            <p style="margin: 0;">${status}</p>
-                        </div>
-                        <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                            <h4 style="margin-bottom: 10px; color: #2c3e50;">Shelter</h4>
-                            <p style="margin: 0;">${shelter}</p>
-                        </div>
-                    </div>
-                `;
-            document.getElementById('viewModalContent').innerHTML = detailsHtml;
-        }
+                    `;
+                    document.getElementById('viewModalContent').innerHTML = detailsHtml;
+                } else {
+                    document.getElementById('viewModalContent').innerHTML =
+                        '<div style="color: #dc3545; text-align: center;">Failed to load vaccination details</div>';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('viewModalContent').innerHTML =
+                    '<div style="color: #dc3545; text-align: center;">Error loading vaccination details</div>';
+            });
     }
 
     // Save vaccination
@@ -1802,9 +1790,8 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
         // Validate required fields
         const petId = formData.get('pet_id');
         const vaccineName = formData.get('vaccine_name');
-        const vaccineType = formData.get('vaccine_type');
 
-        if (!petId || !vaccineName || !vaccineType) {
+        if (!petId || !vaccineName) {
             showMessage('Please fill in all required fields', 'error');
             return;
         }
@@ -1841,7 +1828,8 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
     // Perform AJAX action
     function performAjaxAction(formData) {
         // Show loading state
-        document.body.classList.add('loading');
+        document.body.style.opacity = '0.7';
+        document.body.style.pointerEvents = 'none';
 
         fetch(window.location.href, {
                 method: 'POST',
@@ -1852,11 +1840,11 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
             })
             .then(response => response.json())
             .then(data => {
-                document.body.classList.remove('loading');
+                document.body.style.opacity = '1';
+                document.body.style.pointerEvents = 'auto';
 
                 if (data.success) {
                     showMessage(data.message, 'success');
-
                     // Refresh page after successful action
                     setTimeout(() => {
                         window.location.reload();
@@ -1866,7 +1854,8 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
                 }
             })
             .catch(error => {
-                document.body.classList.remove('loading');
+                document.body.style.opacity = '1';
+                document.body.style.pointerEvents = 'auto';
                 console.error('Error:', error);
                 showMessage('Network error occurred', 'error');
             });
@@ -1903,9 +1892,7 @@ $vaccine_types = ['Core', 'Non-Core', 'Required', 'Optional', 'Booster', 'Initia
 
     // Export vaccinations data
     function exportVaccinations() {
-        const url = new URL(window.location);
-        url.searchParams.set('export', 'csv');
-        window.open(url.toString(), '_blank');
+        showMessage('Export functionality will be implemented', 'info');
     }
 
     // Keyboard shortcuts
