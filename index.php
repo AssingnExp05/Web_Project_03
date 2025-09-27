@@ -89,11 +89,33 @@ $featured_pets = $featured_pets ?: [];
 $success_stories = $success_stories ?: [];
 $latest_guides = $latest_guides ?: [];
 
+// Helper function to get proper image URL
+function getImageUrl($imageName, $type = 'pets') {
+    if (empty($imageName)) {
+        return BASE_URL . 'assets/images/pet-placeholder.jpg';
+    }
+    
+    // Remove any leading/trailing slashes
+    $imageName = trim($imageName, '/\\');
+    
+    // Build the image path
+    $imagePath = "uploads/{$type}/" . $imageName;
+    
+    // Check if file exists (adjust path based on your server setup)
+    $fullPath = $_SERVER['DOCUMENT_ROOT'] . str_replace('http://localhost', '', BASE_URL) . $imagePath;
+    
+    if (file_exists($fullPath)) {
+        return BASE_URL . $imagePath;
+    }
+    
+    return BASE_URL . 'assets/images/pet-placeholder.jpg';
+}
+
 include 'common/header.php';
 ?>
 
 <style>
-/* Enhanced Homepage Styles with Modern Design */
+/* Enhanced Homepage Styles */
 :root {
     /* Color Palette */
     --primary: #6366f1;
@@ -696,9 +718,15 @@ include 'common/header.php';
     background: linear-gradient(145deg, #ffffff, #f8f9fa);
     border-radius: 20px;
     padding: 40px;
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
     position: relative;
     overflow: hidden;
+    transition: all 0.3s ease;
+}
+
+.story-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
 }
 
 .story-card::before {
@@ -707,9 +735,10 @@ include 'common/header.php';
     top: 20px;
     left: 20px;
     font-size: 6rem;
-    color: var(--primary);
+    color: #6366f1;
     opacity: 0.1;
     font-family: serif;
+    line-height: 1;
 }
 
 .story-content {
@@ -734,21 +763,37 @@ include 'common/header.php';
 .story-avatar {
     width: 60px;
     height: 60px;
+    min-width: 60px;
+    min-height: 60px;
     border-radius: 50%;
     overflow: hidden;
-    border: 3px solid var(--primary);
+    border: 3px solid #6366f1;
+    position: relative;
+    flex-shrink: 0;
+    background-color: #f3f4f6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .story-avatar img {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    display: block;
+}
+
+.story-avatar.placeholder {
+    background: linear-gradient(135deg, #6366f1, #ec4899);
+    color: white;
+    font-size: 24px;
 }
 
 .story-info h4 {
     font-size: 1.1rem;
     color: #111827;
     margin-bottom: 5px;
+    font-weight: 600;
 }
 
 .story-info p {
@@ -1105,6 +1150,18 @@ include 'common/header.php';
         bottom: 80px;
         right: 20px;
     }
+
+    .story-card {
+        padding: 30px;
+    }
+
+    .story-card::before {
+        font-size: 4rem;
+    }
+
+    .story-text {
+        font-size: 1.1rem;
+    }
 }
 </style>
 
@@ -1227,12 +1284,8 @@ include 'common/header.php';
             <?php foreach ($featured_pets as $pet): ?>
             <div class="pet-card">
                 <div class="pet-image">
-                    <?php 
-                        $imagePath = !empty($pet['primary_image']) ? 'uploads/pets/' . htmlspecialchars($pet['primary_image']) : 'assets/images/pet-placeholder.jpg';
-                    ?>
-                    <img src="<?php echo BASE_URL . $imagePath; ?>"
-                        alt="<?php echo Security::sanitize($pet['pet_name']); ?>"
-                        onerror="this.src='<?php echo BASE_URL; ?>assets/images/pet-placeholder.jpg'">
+                    <img src="<?php echo getImageUrl($pet['primary_image'], 'pets'); ?>"
+                        alt="<?php echo Security::sanitize($pet['pet_name']); ?>" loading="lazy">
 
                     <div class="pet-badges">
                         <span class="pet-category"><?php echo Security::sanitize($pet['category_name']); ?></span>
@@ -1269,7 +1322,7 @@ include 'common/header.php';
                         <?php 
                             $description = !empty($pet['description']) ? $pet['description'] : 'A wonderful pet looking for a loving home!';
                             echo Security::sanitize(substr($description, 0, 150)) . (strlen($description) > 150 ? '...' : '');
-                        ?>
+                            ?>
                     </p>
 
                     <div class="pet-footer">
@@ -1332,14 +1385,22 @@ include 'common/header.php';
                     </p>
 
                     <div class="story-author">
+                        <?php 
+                        $storyImageUrl = getImageUrl($story['primary_image'], 'pets');
+                        $hasImage = $storyImageUrl !== BASE_URL . 'assets/images/pet-placeholder.jpg';
+                        ?>
+
+                        <?php if ($hasImage): ?>
                         <div class="story-avatar">
-                            <?php 
-                            $storyImagePath = !empty($story['primary_image']) ? 'uploads/pets/' . htmlspecialchars($story['primary_image']) : 'assets/images/pet-placeholder.jpg';
-                            ?>
-                            <img src="<?php echo BASE_URL . $storyImagePath; ?>"
-                                alt="<?php echo Security::sanitize($story['pet_name']); ?>"
-                                onerror="this.src='<?php echo BASE_URL; ?>assets/images/pet-placeholder.jpg'">
+                            <img src="<?php echo $storyImageUrl; ?>"
+                                alt="<?php echo Security::sanitize($story['pet_name']); ?>" loading="lazy">
                         </div>
+                        <?php else: ?>
+                        <div class="story-avatar placeholder">
+                            <i class="fas fa-paw"></i>
+                        </div>
+                        <?php endif; ?>
+
                         <div class="story-info">
                             <h4><?php echo Security::sanitize($story['first_name'] . ' ' . $story['last_name']); ?></h4>
                             <p>Adopted <?php echo Security::sanitize($story['pet_name']); ?> •
@@ -1511,6 +1572,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initScrollAnimations();
     initPetCards();
     initLazyLoading();
+    handleStoryAvatars();
 });
 
 // Initialize Hero Section with local videos
@@ -1678,19 +1740,29 @@ function initPetCards() {
     });
 }
 
+// Handle story avatar images
+function handleStoryAvatars() {
+    const storyAvatars = document.querySelectorAll('.story-avatar img');
+
+    storyAvatars.forEach(img => {
+        img.addEventListener('error', function() {
+            const avatar = this.parentElement;
+            avatar.classList.add('placeholder');
+            avatar.innerHTML = '<i class="fas fa-paw"></i>';
+        });
+    });
+}
+
 // Lazy Loading for Images
 function initLazyLoading() {
-    const images = document.querySelectorAll('img[data-src]');
+    const images = document.querySelectorAll('img[loading="lazy"]');
 
     if ('IntersectionObserver' in window) {
         const imageObserver = new IntersectionObserver(function(entries) {
             entries.forEach(entry => {
                 if (entry.isIntersecting) {
                     const img = entry.target;
-                    img.src = img.dataset.src;
-                    img.onload = () => {
-                        img.classList.add('loaded');
-                    };
+                    img.classList.add('loaded');
                     imageObserver.unobserve(img);
                 }
             });
@@ -1699,11 +1771,6 @@ function initLazyLoading() {
         });
 
         images.forEach(img => imageObserver.observe(img));
-    } else {
-        // Fallback for browsers that don't support IntersectionObserver
-        images.forEach(img => {
-            img.src = img.dataset.src;
-        });
     }
 }
 
@@ -1791,28 +1858,6 @@ console.log('Homepage loaded successfully');
 console.log('Featured pets:', <?php echo count($featured_pets); ?>);
 console.log('Success stories:', <?php echo count($success_stories); ?>);
 console.log('Care guides:', <?php echo count($latest_guides); ?>);
-
-// Verify videos are loaded
-const checkVideos = () => {
-    const video1 = document.getElementById('video1');
-    const video2 = document.getElementById('video2');
-
-    if (video1 && video2) {
-        console.log('Video 1 ready state:', video1.readyState);
-        console.log('Video 2 ready state:', video2.readyState);
-
-        if (video1.readyState < 3 || video2.readyState < 3) {
-            // Videos not fully loaded, show gradient background
-            const heroSection = document.querySelector('.hero-section');
-            if (heroSection) {
-                heroSection.style.background = 'var(--gradient-primary)';
-            }
-        }
-    }
-};
-
-// Check videos after a delay
-setTimeout(checkVideos, 2000);
 </script>
 
 <?php include 'common/footer.php'; ?>
