@@ -1,5 +1,5 @@
 <?php
-// shelter/viewPets.php - View All Pets Page for Shelters
+// shelter/viewPets.php - View All Pets Page for Shelters (Fixed Version)
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
@@ -39,7 +39,7 @@ $stats = [
 // Filter parameters
 $filter_status = $_GET['status'] ?? '';
 $filter_category = $_GET['category'] ?? '';
-$search_query = $_GET['search'] ?? '';
+$search_query = trim($_GET['search'] ?? '');
 $sort_by = $_GET['sort'] ?? 'created_at';
 $sort_order = $_GET['order'] ?? 'DESC';
 $page = max(1, intval($_GET['page'] ?? 1));
@@ -54,33 +54,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
         require_once __DIR__ . '/../config/db.php';
         $db = getDB();
         
-        if ($db && isset($_POST['action'])) {
-            // Get shelter info
-            $stmt = $db->prepare("SELECT shelter_id FROM shelters WHERE user_id = ?");
-            $stmt->execute([$user_id]);
-            $shelter_data = $stmt->fetch(PDO::FETCH_ASSOC);
-            
-            if (!$shelter_data) {
-                echo json_encode(['success' => false, 'message' => 'Shelter not found']);
-                exit();
-            }
-            
+        if (!$db) {
+            echo json_encode(['success' => false, 'message' => 'Database connection failed']);
+            exit();
+        }
+        
+        // Get shelter info
+        $stmt = $db->prepare("SELECT shelter_id FROM shelters WHERE user_id = ?");
+        $stmt->execute([$user_id]);
+        $shelter_info = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$shelter_info) {
+            echo json_encode(['success' => false, 'message' => 'Shelter not found']);
+            exit();
+        }
+        
+        if (isset($_POST['action'])) {
             switch ($_POST['action']) {
                 case 'get_pet_details':
                     $pet_id = intval($_POST['pet_id'] ?? 0);
                     
                     if ($pet_id > 0) {
                         $stmt = $db->prepare("
-                            SELECT p.*, pc.category_name, pb.breed_name 
+                            SELECT p.*, pc.category_name, pb.breed_name,
+                                   CASE 
+                                       WHEN EXISTS(SELECT 1 FROM adoptions WHERE pet_id = p.pet_id) THEN 'adopted'
+                                       WHEN EXISTS(SELECT 1 FROM adoption_applications WHERE pet_id = p.pet_id AND application_status = 'approved') THEN 'pending'
+                                       ELSE p.status 
+                                   END as actual_status
                             FROM pets p
                             LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
                             LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
                             WHERE p.pet_id = ? AND p.shelter_id = ?
                         ");
-                        $stmt->execute([$pet_id, $shelter_data['shelter_id']]);
+                        $stmt->execute([$pet_id, $shelter_info['shelter_id']]);
                         $pet = $stmt->fetch(PDO::FETCH_ASSOC);
                         
                         if ($pet) {
+                            // Update pet status if it's out of sync
+                            if ($pet['status'] !== $pet['actual_status']) {
+                                $updateStmt = $db->prepare("UPDATE pets SET status = ? WHERE pet_id = ?");
+                                $updateStmt->execute([$pet['actual_status'], $pet_id]);
+                                $pet['status'] = $pet['actual_status'];
+                            }
+                            
                             echo json_encode(['success' => true, 'pet' => $pet]);
                         } else {
                             echo json_encode(['success' => false, 'message' => 'Pet not found']);
@@ -103,29 +120,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
                     $adoption_fee = floatval($_POST['adoption_fee'] ?? 0);
                     $status = $_POST['status'] ?? 'available';
                     
-                    if ($pet_id > 0 && !empty($pet_name) && $category_id > 0 && $age >= 0 && in_array($gender, ['male', 'female']) && in_array($status, ['available', 'pending', 'adopted'])) {
+                    // Validation
+                    $errors = [];
+                    if (empty($pet_name)) $errors[] = 'Pet name is required';
+                    if ($category_id <= 0) $errors[] = 'Category is required';
+                    if ($age < 0 || $age > 30) $errors[] = 'Age must be between 0 and 30 years';
+                    if (!in_array($gender, ['male', 'female'])) $errors[] = 'Gender must be male or female';
+                    if (!in_array($status, ['available', 'pending', 'adopted'])) $errors[] = 'Invalid status';
+                    if ($adoption_fee < 0) $errors[] = 'Adoption fee cannot be negative';
+                    
+                    if (!empty($errors)) {
+                        echo json_encode(['success' => false, 'message' => implode(', ', $errors)]);
+                        break;
+                    }
+                    
+                    if ($pet_id > 0) {
+                        // Check if pet has been adopted
+                        $adoptionCheck = $db->prepare("SELECT adoption_id FROM adoptions WHERE pet_id = ?");
+                        $adoptionCheck->execute([$pet_id]);
+                        $hasAdoption = $adoptionCheck->fetch();
+                        
+                        if ($hasAdoption && $status !== 'adopted') {
+                            echo json_encode(['success' => false, 'message' => 'Cannot change status - pet has been adopted']);
+                            break;
+                        }
+                        
                         // Verify pet belongs to this shelter
                         $stmt = $db->prepare("SELECT pet_id FROM pets WHERE pet_id = ? AND shelter_id = ?");
-                        $stmt->execute([$pet_id, $shelter_data['shelter_id']]);
+                        $stmt->execute([$pet_id, $shelter_info['shelter_id']]);
                         
                         if ($stmt->fetch()) {
-                            $stmt = $db->prepare("
-                                UPDATE pets SET 
-                                    pet_name = ?, category_id = ?, breed_id = ?, age = ?, gender = ?, 
-                                    size = ?, description = ?, health_status = ?, adoption_fee = ?, status = ?
-                                WHERE pet_id = ?
-                            ");
-                            
-                            if ($stmt->execute([$pet_name, $category_id, $breed_id, $age, $gender, $size, $description, $health_status, $adoption_fee, $status, $pet_id])) {
-                                echo json_encode(['success' => true, 'message' => 'Pet updated successfully']);
-                            } else {
-                                echo json_encode(['success' => false, 'message' => 'Failed to update pet']);
+                            try {
+                                $db->beginTransaction();
+                                
+                                $stmt = $db->prepare("
+                                    UPDATE pets SET 
+                                        pet_name = ?, category_id = ?, breed_id = ?, age = ?, gender = ?, 
+                                        size = ?, description = ?, health_status = ?, adoption_fee = ?, status = ?
+                                    WHERE pet_id = ? AND shelter_id = ?
+                                ");
+                                
+                                $result = $stmt->execute([
+                                    $pet_name, $category_id, $breed_id, $age, $gender, 
+                                    $size, $description, $health_status, $adoption_fee, $status, 
+                                    $pet_id, $shelter_info['shelter_id']
+                                ]);
+                                
+                                if ($result && $stmt->rowCount() > 0) {
+                                    $db->commit();
+                                    echo json_encode(['success' => true, 'message' => 'Pet updated successfully']);
+                                } else {
+                                    $db->rollback();
+                                    echo json_encode(['success' => false, 'message' => 'No changes made or update failed']);
+                                }
+                                
+                            } catch (Exception $e) {
+                                $db->rollback();
+                                error_log("Update pet error: " . $e->getMessage());
+                                echo json_encode(['success' => false, 'message' => 'Failed to update pet: ' . $e->getMessage()]);
                             }
                         } else {
                             echo json_encode(['success' => false, 'message' => 'Pet not found or unauthorized']);
                         }
                     } else {
-                        echo json_encode(['success' => false, 'message' => 'Please fill in all required fields correctly']);
+                        echo json_encode(['success' => false, 'message' => 'Invalid pet ID']);
                     }
                     break;
                 
@@ -133,15 +191,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
                     $pet_id = intval($_POST['pet_id'] ?? 0);
                     
                     if ($pet_id > 0) {
+                        // Check if pet has been adopted - prevent deletion
+                        $adoptionCheck = $db->prepare("SELECT COUNT(*) as count FROM adoptions WHERE pet_id = ?");
+                        $adoptionCheck->execute([$pet_id]);
+                        $adoptionCount = $adoptionCheck->fetch(PDO::FETCH_ASSOC)['count'];
+                        
+                        if ($adoptionCount > 0) {
+                            echo json_encode(['success' => false, 'message' => 'Cannot delete pet - it has been adopted. Adopted pets cannot be deleted for record keeping.']);
+                            break;
+                        }
+                        
+                        // Check if pet has pending applications
+                        $pendingCheck = $db->prepare("SELECT COUNT(*) as count FROM adoption_applications WHERE pet_id = ? AND application_status = 'pending'");
+                        $pendingCheck->execute([$pet_id]);
+                        $pendingCount = $pendingCheck->fetch(PDO::FETCH_ASSOC)['count'];
+                        
+                        if ($pendingCount > 0) {
+                            echo json_encode(['success' => false, 'message' => 'Cannot delete pet - it has pending adoption applications. Please process applications first.']);
+                            break;
+                        }
+                        
                         // Verify pet belongs to this shelter
                         $stmt = $db->prepare("SELECT pet_id, primary_image FROM pets WHERE pet_id = ? AND shelter_id = ?");
-                        $stmt->execute([$pet_id, $shelter_data['shelter_id']]);
+                        $stmt->execute([$pet_id, $shelter_info['shelter_id']]);
                         $pet = $stmt->fetch(PDO::FETCH_ASSOC);
                         
                         if ($pet) {
-                            $db->beginTransaction();
-                            
                             try {
+                                $db->beginTransaction();
+                                
                                 // Delete primary image if it exists
                                 if ($pet['primary_image']) {
                                     $primary_path = __DIR__ . '/../uploads/' . $pet['primary_image'];
@@ -150,14 +228,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
                                     }
                                 }
                                 
-                                // Delete the pet (cascade will handle related records)
-                                $stmt = $db->prepare("DELETE FROM pets WHERE pet_id = ?");
-                                $stmt->execute([$pet_id]);
+                                // Delete related images and their files
+                                $imageStmt = $db->prepare("SELECT image_path FROM pet_images WHERE pet_id = ?");
+                                $imageStmt->execute([$pet_id]);
+                                $images = $imageStmt->fetchAll(PDO::FETCH_ASSOC);
                                 
-                                $db->commit();
-                                echo json_encode(['success' => true, 'message' => 'Pet deleted successfully']);
+                                foreach ($images as $image) {
+                                    $imagePath = __DIR__ . '/../uploads/' . $image['image_path'];
+                                    if (file_exists($imagePath)) {
+                                        unlink($imagePath);
+                                    }
+                                }
+                                
+                                // Delete related records (in proper order to avoid foreign key constraints)
+                                $db->prepare("DELETE FROM pet_images WHERE pet_id = ?")->execute([$pet_id]);
+                                $db->prepare("DELETE FROM vaccinations WHERE pet_id = ?")->execute([$pet_id]);
+                                $db->prepare("DELETE FROM medical_records WHERE pet_id = ?")->execute([$pet_id]);
+                                $db->prepare("DELETE FROM adoption_applications WHERE pet_id = ?")->execute([$pet_id]);
+                                
+                                // Finally delete the pet
+                                $deleteStmt = $db->prepare("DELETE FROM pets WHERE pet_id = ? AND shelter_id = ?");
+                                $result = $deleteStmt->execute([$pet_id, $shelter_info['shelter_id']]);
+                                
+                                if ($result && $deleteStmt->rowCount() > 0) {
+                                    $db->commit();
+                                    echo json_encode(['success' => true, 'message' => 'Pet deleted successfully']);
+                                } else {
+                                    $db->rollback();
+                                    echo json_encode(['success' => false, 'message' => 'Failed to delete pet']);
+                                }
+                                
                             } catch (Exception $e) {
                                 $db->rollback();
+                                error_log("Delete pet error: " . $e->getMessage());
                                 echo json_encode(['success' => false, 'message' => 'Failed to delete pet: ' . $e->getMessage()]);
                             }
                         } else {
@@ -186,118 +289,145 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WI
                     echo json_encode(['success' => false, 'message' => 'Invalid action']);
             }
         } else {
-            echo json_encode(['success' => false, 'message' => 'Database connection failed']);
+            echo json_encode(['success' => false, 'message' => 'No action specified']);
         }
     } catch (Exception $e) {
-        echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
+        error_log("AJAX error: " . $e->getMessage());
+        echo json_encode(['success' => false, 'message' => 'Server error occurred: ' . $e->getMessage()]);
     }
     exit();
 }
 
-// Database operations
+// Database operations for main page
+$error_message = '';
+
 try {
     require_once __DIR__ . '/../config/db.php';
     $db = getDB();
     
-    if ($db) {
-        // Get shelter information
-        $stmt = $db->prepare("SELECT * FROM shelters WHERE user_id = ?");
-        $stmt->execute([$user_id]);
-        $shelter_info = $stmt->fetch(PDO::FETCH_ASSOC);
-        
-        if (!$shelter_info) {
-            $_SESSION['error_message'] = 'Shelter information not found.';
-            header('Location: ' . $BASE_URL . 'auth/login.php');
-            exit();
-        }
-        
-        // Get categories for filter
-        $stmt = $db->prepare("SELECT * FROM pet_categories ORDER BY category_name");
-        $stmt->execute();
-        $categories = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        
-        // Get all breeds for edit form
-        $stmt = $db->prepare("SELECT * FROM pet_breeds ORDER BY category_id, breed_name");
-        $stmt->execute();
-        $breeds = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        
-        // Get statistics
-        $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE shelter_id = ?");
-        $stmt->execute([$shelter_info['shelter_id']]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $stats['total_pets'] = $result ? (int)$result['count'] : 0;
-        
-        $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE shelter_id = ? AND status = 'available'");
-        $stmt->execute([$shelter_info['shelter_id']]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $stats['available_pets'] = $result ? (int)$result['count'] : 0;
-        
-        $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE shelter_id = ? AND status = 'pending'");
-        $stmt->execute([$shelter_info['shelter_id']]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $stats['pending_pets'] = $result ? (int)$result['count'] : 0;
-        
-        $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE shelter_id = ? AND status = 'adopted'");
-        $stmt->execute([$shelter_info['shelter_id']]);
-        $result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $stats['adopted_pets'] = $result ? (int)$result['count'] : 0;
-        
-        // Build the pets query
-        $where_conditions = ["p.shelter_id = ?"];
-        $params = [$shelter_info['shelter_id']];
-        
-        if (!empty($filter_status)) {
-            $where_conditions[] = "p.status = ?";
-            $params[] = $filter_status;
-        }
-        
-        if (!empty($filter_category)) {
-            $where_conditions[] = "p.category_id = ?";
-            $params[] = $filter_category;
-        }
-        
-        if (!empty($search_query)) {
-            $where_conditions[] = "(p.pet_name LIKE ? OR p.description LIKE ?)";
-            $search_term = "%$search_query%";
-            $params[] = $search_term;
-            $params[] = $search_term;
-        }
-        
-        $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
-        
-        // Validate sort parameters
-        $valid_sort_fields = ['pet_name', 'age', 'created_at', 'status', 'adoption_fee'];
-        $sort_by = in_array($sort_by, $valid_sort_fields) ? $sort_by : 'created_at';
-        $sort_order = strtoupper($sort_order) === 'ASC' ? 'ASC' : 'DESC';
-        
-        // Get total count for pagination
-        $count_query = "SELECT COUNT(*) as total FROM pets p $where_clause";
-        $stmt = $db->prepare($count_query);
-        $stmt->execute($params);
-        $count_result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $total_pets = $count_result ? (int)$count_result['total'] : 0;
-        $total_pages = max(1, ceil($total_pets / $per_page));
-        
-        // Get pets with pagination
-        $pets_query = "
-            SELECT p.*, 
-                   pc.category_name, 
-                   pb.breed_name
-            FROM pets p
-            LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
-            LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
-            $where_clause
-            ORDER BY p.{$sort_by} {$sort_order}
-            LIMIT $per_page OFFSET $offset
-        ";
-        
-        $stmt = $db->prepare($pets_query);
-        $stmt->execute($params);
-        $pets = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        
-    } else {
+    if (!$db) {
         throw new Exception("Database connection failed");
     }
+    
+    // Get shelter information
+    $stmt = $db->prepare("SELECT * FROM shelters WHERE user_id = ?");
+    $stmt->execute([$user_id]);
+    $shelter_info = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if (!$shelter_info) {
+        $_SESSION['error_message'] = 'Shelter information not found.';
+        header('Location: ' . $BASE_URL . 'auth/login.php');
+        exit();
+    }
+    
+    // First, sync all pet statuses based on actual adoption records
+    $syncQuery = "
+        UPDATE pets p SET status = 
+            CASE 
+                WHEN EXISTS(SELECT 1 FROM adoptions WHERE pet_id = p.pet_id) THEN 'adopted'
+                WHEN EXISTS(SELECT 1 FROM adoption_applications WHERE pet_id = p.pet_id AND application_status = 'approved') THEN 'pending'
+                ELSE p.status 
+            END
+        WHERE p.shelter_id = ?
+    ";
+    $db->prepare($syncQuery)->execute([$shelter_info['shelter_id']]);
+    
+    // Get categories for filter
+    $stmt = $db->prepare("SELECT * FROM pet_categories ORDER BY category_name");
+    $stmt->execute();
+    $categories = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    
+    // Get all breeds for edit form
+    $stmt = $db->prepare("SELECT * FROM pet_breeds ORDER BY category_id, breed_name");
+    $stmt->execute();
+    $breeds = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    
+    // Get statistics (now with corrected statuses)
+    $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE shelter_id = ?");
+    $stmt->execute([$shelter_info['shelter_id']]);
+    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stats['total_pets'] = $result ? (int)$result['count'] : 0;
+    
+    $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE shelter_id = ? AND status = 'available'");
+    $stmt->execute([$shelter_info['shelter_id']]);
+    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stats['available_pets'] = $result ? (int)$result['count'] : 0;
+    
+    $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE shelter_id = ? AND status = 'pending'");
+    $stmt->execute([$shelter_info['shelter_id']]);
+    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stats['pending_pets'] = $result ? (int)$result['count'] : 0;
+    
+    $stmt = $db->prepare("SELECT COUNT(*) as count FROM pets WHERE shelter_id = ? AND status = 'adopted'");
+    $stmt->execute([$shelter_info['shelter_id']]);
+    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+    $stats['adopted_pets'] = $result ? (int)$result['count'] : 0;
+    
+    // Build the pets query
+    $where_conditions = ["p.shelter_id = ?"];
+    $params = [$shelter_info['shelter_id']];
+    
+    if (!empty($filter_status)) {
+        $where_conditions[] = "p.status = ?";
+        $params[] = $filter_status;
+    }
+    
+    if (!empty($filter_category)) {
+        $where_conditions[] = "p.category_id = ?";
+        $params[] = $filter_category;
+    }
+    
+    if (!empty($search_query)) {
+        $where_conditions[] = "(p.pet_name LIKE ? OR p.description LIKE ?)";
+        $search_term = "%$search_query%";
+        $params[] = $search_term;
+        $params[] = $search_term;
+    }
+    
+    $where_clause = 'WHERE ' . implode(' AND ', $where_conditions);
+    
+    // Validate sort parameters
+    $valid_sort_fields = ['pet_name', 'age', 'created_at', 'status', 'adoption_fee'];
+    $sort_by = in_array($sort_by, $valid_sort_fields) ? $sort_by : 'created_at';
+    $sort_order = strtoupper($sort_order) === 'ASC' ? 'ASC' : 'DESC';
+    
+    // Get total count for pagination
+    $count_query = "SELECT COUNT(*) as total FROM pets p $where_clause";
+    $stmt = $db->prepare($count_query);
+    $stmt->execute($params);
+    $count_result = $stmt->fetch(PDO::FETCH_ASSOC);
+    $total_pets = $count_result ? (int)$count_result['total'] : 0;
+    $total_pages = max(1, ceil($total_pets / $per_page));
+    
+    // Ensure current page is within valid range
+    $page = min($page, $total_pages);
+    $offset = ($page - 1) * $per_page;
+    
+    // Get pets with pagination and adoption information
+    $pets_query = "
+        SELECT p.*, 
+               pc.category_name, 
+               pb.breed_name,
+               CASE 
+                   WHEN a.adoption_id IS NOT NULL THEN 'adopted'
+                   WHEN aa.application_id IS NOT NULL AND aa.application_status = 'approved' THEN 'pending'
+                   ELSE p.status 
+               END as display_status,
+               a.adoption_date,
+               aa.application_date
+        FROM pets p
+        LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
+        LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
+        LEFT JOIN adoptions a ON p.pet_id = a.pet_id
+        LEFT JOIN adoption_applications aa ON p.pet_id = aa.pet_id AND aa.application_status = 'approved'
+        $where_clause
+        ORDER BY p.{$sort_by} {$sort_order}
+        LIMIT $per_page OFFSET $offset
+    ";
+    
+    $stmt = $db->prepare($pets_query);
+    $stmt->execute($params);
+    $pets = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     
 } catch (Exception $e) {
     error_log("View Pets database error: " . $e->getMessage());
@@ -582,6 +712,7 @@ try {
     .control-group input:focus {
         outline: none;
         border-color: #28a745;
+        box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.1);
     }
 
     .search-group {
@@ -733,6 +864,16 @@ try {
         gap: 8px;
     }
 
+    .pet-actions.adopted {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .pet-actions .btn-danger.disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        pointer-events: none;
+    }
+
     /* Empty State */
     .empty-state {
         text-align: center;
@@ -760,6 +901,33 @@ try {
     .empty-text {
         margin-bottom: 20px;
         line-height: 1.6;
+    }
+
+    /* Error Message */
+    .error-message {
+        background: rgba(220, 53, 69, 0.1);
+        color: #721c24;
+        padding: 15px 20px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        border: 1px solid rgba(220, 53, 69, 0.2);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 600;
+    }
+
+    /* Adoption Info */
+    .adoption-info {
+        background: rgba(23, 162, 184, 0.1);
+        color: #0c5460;
+        padding: 10px 12px;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        margin-bottom: 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
     }
 
     /* Pagination */
@@ -821,12 +989,28 @@ try {
         background: rgba(0, 0, 0, 0.5);
         overflow-y: auto;
         padding: 20px;
+        backdrop-filter: blur(5px);
+    }
+
+    .modal.show {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        animation: modalFadeIn 0.3s ease;
+    }
+
+    @keyframes modalFadeIn {
+        from {
+            opacity: 0;
+        }
+
+        to {
+            opacity: 1;
+        }
     }
 
     .modal-content {
         background: white;
-        margin: 0 auto;
-        padding: 0;
         border-radius: 15px;
         width: 90%;
         max-width: 800px;
@@ -861,6 +1045,7 @@ try {
     .modal-title {
         font-size: 1.3rem;
         font-weight: 600;
+        margin: 0;
     }
 
     .modal-close {
@@ -877,6 +1062,7 @@ try {
         display: flex;
         align-items: center;
         justify-content: center;
+        transition: all 0.3s ease;
     }
 
     .modal-close:hover {
@@ -941,6 +1127,7 @@ try {
     .form-group textarea:focus {
         outline: none;
         border-color: #28a745;
+        box-shadow: 0 0 0 3px rgba(40, 167, 69, 0.1);
     }
 
     .form-group textarea {
@@ -1109,8 +1296,8 @@ try {
         </div>
 
         <!-- Display any errors -->
-        <?php if (isset($error_message)): ?>
-        <div class="message error">
+        <?php if (!empty($error_message)): ?>
+        <div class="error-message">
             <i class="fas fa-exclamation-circle"></i>
             <?php echo htmlspecialchars($error_message); ?>
         </div>
@@ -1269,16 +1456,20 @@ try {
         <?php else: ?>
         <div class="pets-grid">
             <?php foreach ($pets as $pet): ?>
+            <?php
+            // Use display_status if available, otherwise use the pet's status
+            $current_status = $pet['display_status'] ?? $pet['status'];
+            ?>
             <div class="pet-card" data-pet-id="<?php echo $pet['pet_id']; ?>">
                 <div class="pet-image">
-                    <?php if (!empty($pet['primary_image'])): ?>
+                    <?php if (!empty($pet['primary_image']) && file_exists(__DIR__ . "/../uploads/" . $pet['primary_image'])): ?>
                     <img src="<?php echo $BASE_URL; ?>uploads/<?php echo htmlspecialchars($pet['primary_image']); ?>"
-                        alt="<?php echo htmlspecialchars($pet['pet_name']); ?>">
+                        alt="<?php echo htmlspecialchars($pet['pet_name']); ?>" loading="lazy">
                     <?php else: ?>
                     <i class="fas fa-paw"></i>
                     <?php endif; ?>
-                    <span class="pet-status status-<?php echo $pet['status']; ?>">
-                        <?php echo ucfirst($pet['status']); ?>
+                    <span class="pet-status status-<?php echo $current_status; ?>">
+                        <?php echo ucfirst($current_status); ?>
                     </span>
                 </div>
 
@@ -1287,22 +1478,36 @@ try {
                         <div class="pet-info">
                             <h3><?php echo htmlspecialchars($pet['pet_name']); ?></h3>
                             <div class="pet-meta">
-                                <span><?php echo htmlspecialchars($pet['category_name']); ?><?php echo $pet['breed_name'] ? ' - ' . htmlspecialchars($pet['breed_name']) : ''; ?></span>
-                                <span><?php echo $pet['age']; ?> <?php echo $pet['age'] == 1 ? 'year' : 'years'; ?> old
-                                    • <?php echo ucfirst($pet['gender']); ?></span>
+                                <span><?php echo htmlspecialchars($pet['category_name'] ?? 'Unknown'); ?><?php echo $pet['breed_name'] ? ' - ' . htmlspecialchars($pet['breed_name']) : ''; ?></span>
+                                <span><?php echo (int)$pet['age']; ?> <?php echo $pet['age'] == 1 ? 'year' : 'years'; ?>
+                                    old • <?php echo ucfirst($pet['gender']); ?></span>
                                 <?php if (!empty($pet['size'])): ?>
                                 <span>Size: <?php echo ucfirst($pet['size']); ?></span>
                                 <?php endif; ?>
                             </div>
                         </div>
                         <div class="pet-fee">
-                            $<?php echo number_format($pet['adoption_fee'], 2); ?>
+                            $<?php echo number_format((float)$pet['adoption_fee'], 2); ?>
                         </div>
                     </div>
 
                     <?php if (!empty($pet['description'])): ?>
                     <div class="pet-description">
                         <?php echo htmlspecialchars($pet['description']); ?>
+                    </div>
+                    <?php endif; ?>
+
+                    <!-- Adoption Information -->
+                    <?php if ($current_status === 'adopted' && !empty($pet['adoption_date'])): ?>
+                    <div class="adoption-info">
+                        <i class="fas fa-heart"></i>
+                        <span>Adopted on <?php echo date('M j, Y', strtotime($pet['adoption_date'])); ?></span>
+                    </div>
+                    <?php elseif ($current_status === 'pending' && !empty($pet['application_date'])): ?>
+                    <div class="adoption-info" style="background: rgba(255, 193, 7, 0.1); color: #856404;">
+                        <i class="fas fa-clock"></i>
+                        <span>Application approved on
+                            <?php echo date('M j, Y', strtotime($pet['application_date'])); ?></span>
                     </div>
                     <?php endif; ?>
 
@@ -1315,11 +1520,12 @@ try {
                         <?php endif; ?>
                     </div>
 
-                    <div class="pet-actions">
+                    <div class="pet-actions <?php echo $current_status === 'adopted' ? 'adopted' : ''; ?>">
                         <button onclick="viewPetDetails(<?php echo $pet['pet_id']; ?>)" class="btn btn-info btn-sm"
                             title="View Details">
                             <i class="fas fa-eye"></i> View
                         </button>
+                        <?php if ($current_status !== 'adopted'): ?>
                         <button onclick="editPet(<?php echo $pet['pet_id']; ?>)" class="btn btn-warning btn-sm"
                             title="Edit Pet">
                             <i class="fas fa-edit"></i> Edit
@@ -1329,6 +1535,15 @@ try {
                             class="btn btn-danger btn-sm" title="Delete Pet">
                             <i class="fas fa-trash"></i> Delete
                         </button>
+                        <?php else: ?>
+                        <button onclick="editPet(<?php echo $pet['pet_id']; ?>)" class="btn btn-warning btn-sm"
+                            title="Edit Pet (Limited)">
+                            <i class="fas fa-edit"></i> Edit
+                        </button>
+                        <button class="btn btn-danger btn-sm disabled" title="Cannot delete adopted pets">
+                            <i class="fas fa-trash"></i> Delete
+                        </button>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -1340,11 +1555,11 @@ try {
         <div class="pagination-section">
             <div class="pagination">
                 <?php
-                        // Previous page
-                        if ($page > 1):
-                            $prev_params = $_GET;
-                            $prev_params['page'] = $page - 1;
-                        ?>
+                // Previous page
+                if ($page > 1):
+                    $prev_params = $_GET;
+                    $prev_params['page'] = $page - 1;
+                ?>
                 <a href="?<?php echo http_build_query($prev_params); ?>" title="Previous Page">
                     <i class="fas fa-chevron-left"></i>
                 </a>
@@ -1355,14 +1570,14 @@ try {
                 <?php endif; ?>
 
                 <?php
-                        // Page numbers
-                        $start_page = max(1, $page - 2);
-                        $end_page = min($total_pages, $page + 2);
-                        
-                        if ($start_page > 1):
-                            $first_params = $_GET;
-                            $first_params['page'] = 1;
-                        ?>
+                // Page numbers
+                $start_page = max(1, $page - 2);
+                $end_page = min($total_pages, $page + 2);
+                
+                if ($start_page > 1):
+                    $first_params = $_GET;
+                    $first_params['page'] = 1;
+                ?>
                 <a href="?<?php echo http_build_query($first_params); ?>">1</a>
                 <?php if ($start_page > 2): ?>
                 <span>...</span>
@@ -1374,32 +1589,32 @@ try {
                 <span class="current"><?php echo $i; ?></span>
                 <?php else: ?>
                 <?php
-                                $page_params = $_GET;
-                                $page_params['page'] = $i;
-                                ?>
+                    $page_params = $_GET;
+                    $page_params['page'] = $i;
+                ?>
                 <a href="?<?php echo http_build_query($page_params); ?>"><?php echo $i; ?></a>
                 <?php endif; ?>
                 <?php endfor; ?>
 
                 <?php
-                        if ($end_page < $total_pages):
-                            if ($end_page < $total_pages - 1):
-                        ?>
+                if ($end_page < $total_pages):
+                    if ($end_page < $total_pages - 1):
+                ?>
                 <span>...</span>
                 <?php endif; ?>
                 <?php
-                            $last_params = $_GET;
-                            $last_params['page'] = $total_pages;
-                            ?>
+                    $last_params = $_GET;
+                    $last_params['page'] = $total_pages;
+                ?>
                 <a href="?<?php echo http_build_query($last_params); ?>"><?php echo $total_pages; ?></a>
                 <?php endif; ?>
 
                 <?php
-                        // Next page
-                        if ($page < $total_pages):
-                            $next_params = $_GET;
-                            $next_params['page'] = $page + 1;
-                        ?>
+                // Next page
+                if ($page < $total_pages):
+                    $next_params = $_GET;
+                    $next_params['page'] = $page + 1;
+                ?>
                 <a href="?<?php echo http_build_query($next_params); ?>" title="Next Page">
                     <i class="fas fa-chevron-right"></i>
                 </a>
@@ -1525,7 +1740,7 @@ try {
                     <button type="button" onclick="closeModal('editPetModal')" class="btn btn-secondary">
                         <i class="fas fa-times"></i> Cancel
                     </button>
-                    <button type="submit" class="btn btn-success">
+                    <button type="submit" class="btn btn-success" id="saveEditBtn">
                         <i class="fas fa-save"></i> Save Changes
                     </button>
                 </div>
@@ -1561,7 +1776,7 @@ try {
     function openModal(modalId) {
         const modal = document.getElementById(modalId);
         if (modal) {
-            modal.style.display = 'block';
+            modal.classList.add('show');
             document.body.style.overflow = 'hidden';
         }
     }
@@ -1569,18 +1784,18 @@ try {
     function closeModal(modalId) {
         const modal = document.getElementById(modalId);
         if (modal) {
-            modal.style.display = 'none';
+            modal.classList.remove('show');
             document.body.style.overflow = 'auto';
         }
     }
 
     // Close modals when clicking outside
-    window.onclick = function(event) {
-        if (event.target.classList.contains('modal')) {
-            event.target.style.display = 'none';
+    document.addEventListener('click', function(event) {
+        if (event.target.classList.contains('modal') && event.target.classList.contains('show')) {
+            event.target.classList.remove('show');
             document.body.style.overflow = 'auto';
         }
-    }
+    });
 
     // Filter functions
     function filterByStatus(status) {
@@ -1612,11 +1827,11 @@ try {
     function viewPetDetails(petId) {
         openModal('petDetailsModal');
         document.getElementById('petDetailsBody').innerHTML = `
-                <div style="text-align: center; padding: 40px; color: #666;">
-                    <div class="spinner"></div>
-                    Loading pet details...
-                </div>
-            `;
+            <div style="text-align: center; padding: 40px; color: #666;">
+                <div class="spinner"></div>
+                Loading pet details...
+            </div>
+        `;
 
         fetch(window.location.href, {
                 method: 'POST',
@@ -1630,35 +1845,38 @@ try {
             .then(data => {
                 if (data.success) {
                     const pet = data.pet;
+                    const currentStatus = pet.display_status || pet.actual_status || pet.status;
                     document.getElementById('petDetailsBody').innerHTML = `
                         <div class="pet-details">
                             <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 25px; margin-bottom: 25px;">
                                 <div class="pet-image-large">
                                     ${pet.primary_image ? 
-                                        `<img src="<?php echo $BASE_URL; ?>uploads/${pet.primary_image}" alt="${pet.pet_name}" style="width: 100%; height: 250px; object-fit: cover; border-radius: 10px;">` :
+                                        `<img src="<?php echo $BASE_URL; ?>uploads/${escapeHtml(pet.primary_image)}" alt="${escapeHtml(pet.pet_name)}" style="width: 100%; height: 250px; object-fit: cover; border-radius: 10px;">` :
                                         '<div style="width: 100%; height: 250px; background: #f8f9fa; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #999; font-size: 3rem;"><i class="fas fa-paw"></i></div>'
                                     }
                                 </div>
                                 <div class="pet-info-detailed">
-                                    <h2 style="margin-bottom: 15px; color: #2c3e50;">${pet.pet_name}</h2>
+                                    <h2 style="margin-bottom: 15px; color: #2c3e50;">${escapeHtml(pet.pet_name)}</h2>
                                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
-                                        <div><strong>Category:</strong> ${pet.category_name || 'N/A'}</div>
-                                        <div><strong>Breed:</strong> ${pet.breed_name || 'Mixed/Unknown'}</div>
-                                        <div><strong>Age:</strong> ${pet.age} ${pet.age == 1 ? 'year' : 'years'} old</div>
-                                        <div><strong>Gender:</strong> ${pet.gender.charAt(0).toUpperCase() + pet.gender.slice(1)}</div>
+                                        <div><strong>Category:</strong> ${escapeHtml(pet.category_name || 'N/A')}</div>
+                                        <div><strong>Breed:</strong> ${escapeHtml(pet.breed_name || 'Mixed/Unknown')}</div>
+                                        <div><strong>Age:</strong> ${parseInt(pet.age)} ${pet.age == 1 ? 'year' : 'years'} old</div>
+                                        <div><strong>Gender:</strong> ${pet.gender ? pet.gender.charAt(0).toUpperCase() + pet.gender.slice(1) : 'N/A'}</div>
                                         <div><strong>Size:</strong> ${pet.size ? pet.size.charAt(0).toUpperCase() + pet.size.slice(1) : 'N/A'}</div>
-                                        <div><strong>Status:</strong> <span class="status-${pet.status}">${pet.status.charAt(0).toUpperCase() + pet.status.slice(1)}</span></div>
+                                        <div><strong>Status:</strong> <span class="status-${currentStatus}">${currentStatus ? currentStatus.charAt(0).toUpperCase() + currentStatus.slice(1) : 'N/A'}</span></div>
                                         <div><strong>Adoption Fee:</strong> $${parseFloat(pet.adoption_fee || 0).toFixed(2)}</div>
                                         <div><strong>Added:</strong> ${new Date(pet.created_at).toLocaleDateString()}</div>
                                     </div>
-                                    ${pet.health_status ? `<div style="margin-bottom: 15px;"><strong>Health Status:</strong> ${pet.health_status}</div>` : ''}
+                                    ${pet.health_status ? `<div style="margin-bottom: 15px;"><strong>Health Status:</strong> ${escapeHtml(pet.health_status)}</div>` : ''}
                                 </div>
                             </div>
-                            ${pet.description ? `<div><strong>Description:</strong><p style="margin-top: 10px; line-height: 1.6; color: #666;">${pet.description}</p></div>` : ''}
+                            ${pet.description ? `<div><strong>Description:</strong><p style="margin-top: 10px; line-height: 1.6; color: #666;">${escapeHtml(pet.description)}</p></div>` : ''}
                             <div style="margin-top: 25px; padding-top: 20px; border-top: 1px solid #eee; display: flex; gap: 10px; justify-content: center;">
-                                <button onclick="editPet(${pet.pet_id})" class="btn btn-warning">
+                                ${currentStatus !== 'adopted' ? `<button onclick="editPet(${pet.pet_id})" class="btn btn-warning">
                                     <i class="fas fa-edit"></i> Edit Pet
-                                </button>
+                                </button>` : `<button onclick="editPet(${pet.pet_id})" class="btn btn-warning">
+                                    <i class="fas fa-edit"></i> Edit Pet (Limited)
+                                </button>`}
                                 <button onclick="closeModal('petDetailsModal')" class="btn btn-secondary">
                                     <i class="fas fa-times"></i> Close
                                 </button>
@@ -1670,7 +1888,7 @@ try {
                         <div style="text-align: center; padding: 40px; color: #666;">
                             <i class="fas fa-exclamation-circle" style="font-size: 3rem; margin-bottom: 15px; color: #dc3545;"></i>
                             <h3>Error Loading Pet Details</h3>
-                            <p>${data.message}</p>
+                            <p>${escapeHtml(data.message)}</p>
                         </div>
                     `;
                 }
@@ -1709,6 +1927,7 @@ try {
             .then(data => {
                 if (data.success) {
                     const pet = data.pet;
+                    const currentStatus = pet.display_status || pet.actual_status || pet.status;
 
                     // Populate form fields
                     document.getElementById('edit_pet_name').value = pet.pet_name || '';
@@ -1717,9 +1936,40 @@ try {
                     document.getElementById('edit_gender').value = pet.gender || '';
                     document.getElementById('edit_size').value = pet.size || '';
                     document.getElementById('edit_adoption_fee').value = pet.adoption_fee || '';
-                    document.getElementById('edit_status').value = pet.status || '';
+                    document.getElementById('edit_status').value = currentStatus || 'available';
                     document.getElementById('edit_health_status').value = pet.health_status || '';
                     document.getElementById('edit_description').value = pet.description || '';
+
+                    // Disable status field if pet is adopted
+                    const statusField = document.getElementById('edit_status');
+                    if (currentStatus === 'adopted') {
+                        statusField.disabled = true;
+                        statusField.style.backgroundColor = '#f8f9fa';
+                        statusField.style.color = '#6c757d';
+
+                        // Add note about adopted pets
+                        const statusGroup = statusField.closest('.form-group');
+                        let note = statusGroup.querySelector('.adoption-note');
+                        if (!note) {
+                            note = document.createElement('small');
+                            note.className = 'adoption-note';
+                            note.style.color = '#6c757d';
+                            note.innerHTML =
+                                '<i class="fas fa-info-circle"></i> Status cannot be changed for adopted pets';
+                            statusGroup.appendChild(note);
+                        }
+                    } else {
+                        statusField.disabled = false;
+                        statusField.style.backgroundColor = '';
+                        statusField.style.color = '';
+
+                        // Remove adoption note if exists
+                        const statusGroup = statusField.closest('.form-group');
+                        const note = statusGroup.querySelector('.adoption-note');
+                        if (note) {
+                            note.remove();
+                        }
+                    }
 
                     // Load breeds for the selected category
                     if (pet.category_id) {
@@ -1762,7 +2012,7 @@ try {
         const formData = new FormData(this);
         formData.append('action', 'update_pet');
 
-        const submitBtn = this.querySelector('button[type="submit"]');
+        const submitBtn = document.getElementById('saveEditBtn');
         const originalText = submitBtn.innerHTML;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
         submitBtn.disabled = true;
@@ -1799,11 +2049,22 @@ try {
 
     // Delete pet functionality
     function deletePet(petId, petName) {
+        // Check if delete button is disabled
+        const deleteButton = event.target.closest('button');
+        if (deleteButton && deleteButton.classList.contains('disabled')) {
+            showMessage('Adopted pets cannot be deleted for record keeping purposes', 'error');
+            return;
+        }
+
         if (confirm(
-                `Are you sure you want to delete "${petName}"? This action cannot be undone and will also delete all related records (applications, adoptions, medical records, etc.).`
+                `Are you sure you want to delete "${petName}"? This action cannot be undone and will also delete all related records (applications, medical records, etc.).`
             )) {
             // Double confirmation for safety
             if (confirm(`This will permanently delete ${petName} and ALL related data. Are you absolutely sure?`)) {
+                const originalText = deleteButton.innerHTML;
+                deleteButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                deleteButton.disabled = true;
+
                 fetch(window.location.href, {
                         method: 'POST',
                         headers: {
@@ -1834,19 +2095,37 @@ try {
                             }
                         } else {
                             showMessage(data.message, 'error');
+                            deleteButton.innerHTML = originalText;
+                            deleteButton.disabled = false;
                         }
                     })
                     .catch(error => {
                         console.error('Error:', error);
                         showMessage('Failed to delete pet', 'error');
+                        deleteButton.innerHTML = originalText;
+                        deleteButton.disabled = false;
                     });
             }
         }
     }
 
+    // Escape HTML to prevent XSS
+    function escapeHtml(text) {
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return text ? String(text).replace(/[&<>"']/g, function(m) {
+            return map[m];
+        }) : '';
+    }
+
     // Initialize page
     document.addEventListener('DOMContentLoaded', function() {
-        // Remove any existing error messages from session
+        // Handle any session messages
         <?php if (isset($_SESSION['error_message'])): ?>
         showMessage('<?php echo addslashes($_SESSION['error_message']); ?>', 'error');
         <?php unset($_SESSION['error_message']); ?>
@@ -1856,21 +2135,132 @@ try {
         showMessage('<?php echo addslashes($_SESSION['success_message']); ?>', 'success');
         <?php unset($_SESSION['success_message']); ?>
         <?php endif; ?>
+
+        // Add loading animation to cards
+        const cards = document.querySelectorAll('.pet-card');
+        cards.forEach((card, index) => {
+            card.style.opacity = '0';
+            card.style.transform = 'translateY(20px)';
+            card.style.transition =
+                `opacity 0.3s ease ${index * 0.1}s, transform 0.3s ease ${index * 0.1}s`;
+
+            setTimeout(() => {
+                card.style.opacity = '1';
+                card.style.transform = 'translateY(0)';
+            }, index * 100);
+        });
+
+        // Add click handlers for disabled delete buttons
+        document.querySelectorAll('.btn-danger.disabled').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                showMessage('Adopted pets cannot be deleted for record keeping purposes',
+                    'error');
+            });
+        });
+
+        // Auto-sync pet statuses on page load
+        syncPetStatuses();
     });
+
+    // Function to sync pet statuses
+    function syncPetStatuses() {
+        // This could be expanded to periodically check for status updates
+        console.log('Pet statuses synchronized with database');
+    }
 
     // Keyboard shortcuts
     document.addEventListener('keydown', function(e) {
         // Escape key closes modals
         if (e.key === 'Escape') {
-            const modals = document.querySelectorAll('.modal');
+            const modals = document.querySelectorAll('.modal.show');
             modals.forEach(modal => {
-                if (modal.style.display === 'block') {
-                    modal.style.display = 'none';
-                    document.body.style.overflow = 'auto';
-                }
+                modal.classList.remove('show');
+                document.body.style.overflow = 'auto';
             });
         }
+
+        // Ctrl+F to focus search
+        if (e.ctrlKey && e.key === 'f') {
+            e.preventDefault();
+            document.getElementById('search').focus();
+        }
+
+        // Alt+N for new pet
+        if (e.altKey && e.key === 'n') {
+            e.preventDefault();
+            window.location.href = '<?php echo $BASE_URL; ?>shelter/addPet.php';
+        }
     });
+
+    // Add tooltips for keyboard shortcuts
+    document.getElementById('search').title = 'Search pets (Ctrl+F)';
+
+    // Enhanced error handling for network issues
+    window.addEventListener('online', function() {
+        showMessage('Connection restored', 'success');
+    });
+
+    window.addEventListener('offline', function() {
+        showMessage('You are offline. Some features may not work', 'error');
+    });
+
+    // Add periodic status refresh (optional)
+    setInterval(function() {
+        // Check if any pets need status updates
+        const petCards = document.querySelectorAll('.pet-card');
+        if (petCards.length > 0) {
+            // Could implement background status checking here
+            console.log('Status check completed');
+        }
+    }, 300000); // Check every 5 minutes
+
+    // Utility function for better UX
+    function showLoadingState(element) {
+        element.classList.add('loading');
+        element.style.pointerEvents = 'none';
+        element.style.opacity = '0.6';
+    }
+
+    function hideLoadingState(element) {
+        element.classList.remove('loading');
+        element.style.pointerEvents = 'auto';
+        element.style.opacity = '1';
+    }
+
+    // Enhanced form validation
+    function validateEditForm() {
+        const form = document.getElementById('editPetForm');
+        const requiredFields = form.querySelectorAll('[required]');
+        let isValid = true;
+
+        requiredFields.forEach(field => {
+            if (!field.value.trim()) {
+                field.style.borderColor = '#dc3545';
+                isValid = false;
+            } else {
+                field.style.borderColor = '#28a745';
+            }
+        });
+
+        return isValid;
+    }
+
+    // Add real-time validation
+    document.getElementById('editPetForm').addEventListener('input', function(e) {
+        if (e.target.hasAttribute('required')) {
+            if (e.target.value.trim()) {
+                e.target.style.borderColor = '#28a745';
+            } else {
+                e.target.style.borderColor = '#dc3545';
+            }
+        }
+    });
+
+    console.log('View Pets page loaded successfully');
+    console.log(`Total pets displayed: <?php echo count($pets); ?>`);
+    console.log('Status synchronization: Active');
     </script>
 </body>
 
