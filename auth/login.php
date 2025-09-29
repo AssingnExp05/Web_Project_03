@@ -126,30 +126,120 @@ include __DIR__ . '/../common/header.php';
 ?>
 
 <style>
-/* Login Page Specific Styles */
+/* Enhanced Login Page Styles */
 .login-page {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px 0;
+    background: #f8f9fa;
     position: relative;
     overflow: hidden;
 }
 
+/* Animated Background */
 .login-page::before {
     content: '';
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-image:
-        radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.1) 2px, transparent 2px),
-        radial-gradient(circle at 80% 80%, rgba(255, 255, 255, 0.1) 2px, transparent 2px);
-    background-size: 60px 60px;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: linear-gradient(45deg,
+            transparent 30%,
+            rgba(99, 102, 241, 0.1) 30%,
+            rgba(99, 102, 241, 0.1) 70%,
+            transparent 70%);
+    background-size: 100px 100px;
+    animation: backgroundMove 20s linear infinite;
     pointer-events: none;
+}
+
+@keyframes backgroundMove {
+    0% {
+        transform: translate(0, 0);
+    }
+
+    100% {
+        transform: translate(50px, 50px);
+    }
+}
+
+/* Floating Shapes */
+.shape {
+    position: absolute;
+    opacity: 0.1;
+}
+
+.shape-1 {
+    top: 10%;
+    left: 10%;
+    width: 100px;
+    height: 100px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%;
+    animation: float1 15s ease-in-out infinite;
+}
+
+.shape-2 {
+    top: 60%;
+    right: 10%;
+    width: 150px;
+    height: 150px;
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    border-radius: 63% 37% 54% 46% / 55% 48% 52% 45%;
+    animation: float2 20s ease-in-out infinite;
+}
+
+.shape-3 {
+    bottom: 10%;
+    left: 20%;
+    width: 80px;
+    height: 80px;
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+    border-radius: 41% 59% 41% 59% / 41% 59% 41% 59%;
+    animation: float3 18s ease-in-out infinite;
+}
+
+@keyframes float1 {
+
+    0%,
+    100% {
+        transform: translateY(0) rotate(0deg);
+    }
+
+    50% {
+        transform: translateY(-30px) rotate(180deg);
+    }
+}
+
+@keyframes float2 {
+
+    0%,
+    100% {
+        transform: translateX(0) rotate(0deg);
+    }
+
+    50% {
+        transform: translateX(-30px) rotate(360deg);
+    }
+}
+
+@keyframes float3 {
+
+    0%,
+    100% {
+        transform: translate(0, 0) rotate(0deg);
+    }
+
+    33% {
+        transform: translate(30px, -30px) rotate(120deg);
+    }
+
+    66% {
+        transform: translate(-20px, 20px) rotate(240deg);
+    }
 }
 
 .login-container {
@@ -168,228 +258,165 @@ include __DIR__ . '/../common/header.php';
 /* Login Card */
 .login-card {
     background: white;
-    border-radius: 25px;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.15);
+    border-radius: 30px;
     overflow: hidden;
-    backdrop-filter: blur(10px);
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.1);
+    position: relative;
+    animation: slideInLeft 0.8s ease-out;
+}
+
+@keyframes slideInLeft {
+    from {
+        opacity: 0;
+        transform: translateX(-50px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
 }
 
 .login-header {
-    background: linear-gradient(135deg, #2c3e50, #34495e);
-    color: white;
-    padding: 40px 30px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    padding: 50px 40px;
     text-align: center;
     position: relative;
+    overflow: hidden;
 }
 
 .login-header::before {
     content: '';
     position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: linear-gradient(90deg, #667eea, #764ba2);
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(circle, rgba(255, 255, 255, 0.1) 2px, transparent 2px);
+    background-size: 30px 30px;
+    animation: headerPattern 30s linear infinite;
+}
+
+@keyframes headerPattern {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+.login-logo {
+    width: 80px;
+    height: 80px;
+    background: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 25px;
+    position: relative;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.login-logo i {
+    font-size: 2.5rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
 }
 
 .login-header h1 {
-    font-size: 2.2rem;
-    font-weight: 700;
+    font-size: 2.5rem;
+    font-weight: 800;
     margin: 0 0 10px 0;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
+    color: white;
+    position: relative;
 }
 
 .login-header p {
     margin: 0;
-    opacity: 0.9;
+    color: rgba(255, 255, 255, 0.9);
     font-size: 1.1rem;
+    position: relative;
 }
 
 .login-body {
-    padding: 40px;
-}
-
-/* Demo Credentials */
-.demo-section {
-    background: linear-gradient(135deg, #fff3cd, #ffeaa7);
-    border: 2px solid #f39c12;
-    border-radius: 15px;
-    padding: 25px;
-    margin-bottom: 30px;
-    position: relative;
-    overflow: hidden;
-}
-
-.demo-section::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 4px;
-    background: linear-gradient(90deg, #f39c12, #e67e22);
-}
-
-.demo-title {
-    font-weight: 700;
-    color: #856404;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 1.2rem;
-}
-
-.demo-title i {
-    font-size: 1.4rem;
-    animation: pulse 2s infinite;
-}
-
-.demo-grid {
-    display: grid;
-    gap: 15px;
-}
-
-.demo-item {
-    background: rgba(255, 255, 255, 0.8);
-    border-radius: 12px;
-    padding: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    transition: all 0.3s ease;
-    border: 2px solid transparent;
-    cursor: pointer;
-    position: relative;
-    overflow: hidden;
-}
-
-.demo-item:hover {
-    background: rgba(255, 255, 255, 0.95);
-    border-color: #f39c12;
-    transform: translateX(5px);
-    box-shadow: 0 5px 15px rgba(243, 156, 18, 0.3);
-}
-
-.demo-item-left {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-}
-
-.demo-icon {
-    width: 45px;
-    height: 45px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 1.3rem;
-    font-weight: bold;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
-
-.admin-icon {
-    background: linear-gradient(135deg, #e74c3c, #c0392b);
-}
-
-.shelter-icon {
-    background: linear-gradient(135deg, #27ae60, #2ecc71);
-}
-
-.adopter-icon {
-    background: linear-gradient(135deg, #3498db, #2980b9);
-}
-
-.demo-info h4 {
-    margin: 0 0 5px 0;
-    color: #2c3e50;
-    font-weight: 700;
-    font-size: 1.1rem;
-}
-
-.demo-email {
-    font-size: 0.9rem;
-    color: #6c757d;
-    font-family: 'Courier New', monospace;
-    background: rgba(108, 117, 125, 0.1);
-    padding: 3px 8px;
-    border-radius: 6px;
-    display: inline-block;
-}
-
-.demo-password {
-    background: #2c3e50;
-    color: white;
-    padding: 10px 18px;
-    border-radius: 25px;
-    font-family: 'Courier New', monospace;
-    font-size: 0.95rem;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    border: none;
-    box-shadow: 0 4px 12px rgba(44, 62, 80, 0.3);
-}
-
-.demo-password:hover {
-    background: #34495e;
-    transform: scale(1.05);
+    padding: 50px 40px;
 }
 
 /* Form Styles */
 .form-group {
-    margin-bottom: 25px;
+    margin-bottom: 30px;
+    position: relative;
 }
 
 .form-label {
     display: block;
-    margin-bottom: 10px;
-    font-weight: 700;
+    margin-bottom: 12px;
+    font-weight: 600;
     color: #2c3e50;
     font-size: 1rem;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+    transition: color 0.3s ease;
 }
 
-.form-label i {
-    color: #667eea;
-    font-size: 1.1rem;
+.input-wrapper {
+    position: relative;
 }
 
 .form-input {
     width: 100%;
-    padding: 16px 20px;
-    border: 2px solid #e9ecef;
-    border-radius: 12px;
+    padding: 16px 20px 16px 50px;
+    border: 2px solid #e1e8ed;
+    border-radius: 15px;
     font-size: 1.05rem;
-    font-family: inherit;
     transition: all 0.3s ease;
-    background: #fafbfc;
+    background: #f8f9fa;
     box-sizing: border-box;
+}
+
+.input-icon {
+    position: absolute;
+    left: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #95a5a6;
+    font-size: 1.2rem;
+    transition: color 0.3s ease;
 }
 
 .form-input:focus {
     outline: none;
     border-color: #667eea;
     background: white;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-    transform: translateY(-2px);
+    box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+}
+
+.form-input:focus~.input-icon {
+    color: #667eea;
+}
+
+.form-input:valid~.input-icon {
+    color: #10b981;
 }
 
 .form-input.error {
-    border-color: #e74c3c;
-    background: #fef5f5;
-    animation: shake 0.5s ease-in-out;
+    border-color: #ef4444;
+    background: #fef2f2;
 }
 
+.form-input.error~.input-icon {
+    color: #ef4444;
+}
+
+/* Enhanced Form Options */
 .form-options {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin: 20px 0;
+    margin: 25px 0 35px;
     flex-wrap: wrap;
     gap: 15px;
 }
@@ -397,20 +424,50 @@ include __DIR__ . '/../common/header.php';
 .remember-me {
     display: flex;
     align-items: center;
-    gap: 10px;
-    color: #6c757d;
-    font-size: 0.95rem;
     cursor: pointer;
-    transition: color 0.3s ease;
+    user-select: none;
+    position: relative;
 }
 
-.remember-me:hover {
-    color: #2c3e50;
+.remember-me input[type="checkbox"] {
+    display: none;
 }
 
-.remember-me input {
-    transform: scale(1.3);
-    accent-color: #667eea;
+.custom-checkbox {
+    width: 22px;
+    height: 22px;
+    border: 2px solid #d1d5db;
+    border-radius: 6px;
+    margin-right: 10px;
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+.remember-me input[type="checkbox"]:checked~.custom-checkbox {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-color: #667eea;
+}
+
+.custom-checkbox::after {
+    content: '\f00c';
+    font-family: 'Font Awesome 5 Free';
+    font-weight: 900;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0);
+    color: white;
+    font-size: 0.8rem;
+    transition: transform 0.3s ease;
+}
+
+.remember-me input[type="checkbox"]:checked~.custom-checkbox::after {
+    transform: translate(-50%, -50%) scale(1);
+}
+
+.remember-me-text {
+    color: #6b7280;
+    font-size: 0.95rem;
 }
 
 .forgot-password {
@@ -418,13 +475,8 @@ include __DIR__ . '/../common/header.php';
     text-decoration: none;
     font-size: 0.95rem;
     font-weight: 600;
-    transition: all 0.3s ease;
     position: relative;
-}
-
-.forgot-password:hover {
-    color: #5a67d8;
-    text-decoration: none;
+    transition: color 0.3s ease;
 }
 
 .forgot-password::after {
@@ -432,45 +484,323 @@ include __DIR__ . '/../common/header.php';
     position: absolute;
     width: 0;
     height: 2px;
-    bottom: -2px;
+    bottom: -3px;
     left: 0;
-    background-color: #5a67d8;
+    background: #667eea;
     transition: width 0.3s ease;
+}
+
+.forgot-password:hover {
+    color: #5a67d8;
 }
 
 .forgot-password:hover::after {
     width: 100%;
 }
 
+/* Enhanced Login Button */
 .login-btn {
     width: 100%;
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     padding: 18px 30px;
     border: none;
-    border-radius: 12px;
-    font-size: 1.2rem;
+    border-radius: 15px;
+    font-size: 1.1rem;
     font-weight: 700;
     cursor: pointer;
-    transition: all 0.4s ease;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
+    transition: all 0.3s ease;
     position: relative;
     overflow: hidden;
-    box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
 }
 
 .login-btn:hover {
-    background: linear-gradient(135deg, #5a67d8, #6b46c1);
-    transform: translateY(-3px);
-    box-shadow: 0 15px 35px rgba(102, 126, 234, 0.4);
+    transform: translateY(-2px);
+    box-shadow: 0 15px 40px rgba(102, 126, 234, 0.4);
 }
 
 .login-btn:active {
     transform: translateY(0);
-    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.3);
 }
 
+.login-btn::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transform: translate(-50%, -50%);
+    transition: width 0.6s, height 0.6s;
+}
+
+.login-btn:hover::before {
+    width: 300px;
+    height: 300px;
+}
+
+/* Divider */
+.divider {
+    text-align: center;
+    margin: 40px 0 30px;
+    position: relative;
+}
+
+.divider::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: #e1e8ed;
+}
+
+.divider span {
+    background: white;
+    padding: 0 20px;
+    position: relative;
+    color: #95a5a6;
+    font-size: 0.95rem;
+}
+
+/* Register Link */
+.register-link {
+    text-align: center;
+}
+
+.register-link p {
+    color: #6b7280;
+    margin-bottom: 20px;
+    font-size: 1.05rem;
+}
+
+.btn-register {
+    display: inline-block;
+    background: transparent;
+    color: #667eea;
+    padding: 14px 30px;
+    border: 2px solid #667eea;
+    border-radius: 15px;
+    text-decoration: none;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-register:hover {
+    color: white;
+    background: #667eea;
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+}
+
+/* Info Panel */
+.info-panel {
+    padding: 40px;
+    animation: slideInRight 0.8s ease-out;
+}
+
+@keyframes slideInRight {
+    from {
+        opacity: 0;
+        transform: translateX(50px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.info-content {
+    text-align: center;
+}
+
+.info-image {
+    width: 100%;
+    max-width: 500px;
+    margin: 0 auto 40px;
+    position: relative;
+}
+
+.info-image img {
+    width: 100%;
+    height: auto;
+    border-radius: 30px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.1);
+}
+
+.info-title {
+    font-size: 3rem;
+    font-weight: 800;
+    margin-bottom: 20px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.2;
+}
+
+.info-subtitle {
+    font-size: 1.3rem;
+    color: #6b7280;
+    margin-bottom: 40px;
+    line-height: 1.8;
+}
+
+.feature-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    text-align: left;
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+.feature-list li {
+    display: flex;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 20px;
+    background: linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%);
+    border-radius: 15px;
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+}
+
+.feature-list li:hover {
+    transform: translateX(10px);
+    border-color: #e1e8ed;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+}
+
+.feature-list i {
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 1.2rem;
+    margin-right: 15px;
+    flex-shrink: 0;
+}
+
+.feature-list span {
+    color: #4b5563;
+    font-size: 1.05rem;
+}
+
+/* Alerts */
+.alert {
+    padding: 18px 24px;
+    border-radius: 15px;
+    margin-bottom: 25px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    font-weight: 500;
+    animation: slideDown 0.5s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.alert::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+}
+
+.alert i {
+    font-size: 1.3rem;
+    flex-shrink: 0;
+}
+
+.alert-success {
+    background: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #6ee7b7;
+}
+
+.alert-success::before {
+    background: #10b981;
+}
+
+.alert-error {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+.alert-error::before {
+    background: #ef4444;
+}
+
+/* Mobile Responsive */
+@media (max-width: 768px) {
+    .login-container {
+        grid-template-columns: 1fr;
+        gap: 40px;
+        padding: 20px;
+    }
+
+    .info-panel {
+        display: none;
+    }
+
+    .login-card {
+        max-width: 450px;
+        margin: 0 auto;
+    }
+
+    .login-header {
+        padding: 40px 30px;
+    }
+
+    .login-body {
+        padding: 40px 30px;
+    }
+
+    .login-header h1 {
+        font-size: 2rem;
+    }
+
+    .form-options {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+
+    .shape {
+        display: none;
+    }
+}
+
+/* Loading State */
 .login-btn.loading {
     opacity: 0.8;
     cursor: not-allowed;
@@ -482,218 +812,16 @@ include __DIR__ . '/../common/header.php';
     position: absolute;
     width: 20px;
     height: 20px;
-    margin: auto;
+    top: 50%;
+    left: 50%;
+    margin-left: 10px;
+    margin-top: -10px;
     border: 2px solid transparent;
     border-top-color: #ffffff;
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
 
-.register-link {
-    text-align: center;
-    margin-top: 30px;
-    padding-top: 30px;
-    border-top: 2px solid #f8f9fa;
-}
-
-.register-link p {
-    color: #6c757d;
-    margin-bottom: 15px;
-    font-size: 1.05rem;
-}
-
-.register-link .btn-secondary {
-    background: #6c757d;
-    color: white;
-    padding: 12px 25px;
-    border: none;
-    border-radius: 8px;
-    text-decoration: none;
-    font-weight: 600;
-    transition: all 0.3s ease;
-    display: inline-block;
-}
-
-.register-link .btn-secondary:hover {
-    background: #5a6268;
-    transform: translateY(-2px);
-    box-shadow: 0 5px 15px rgba(108, 117, 125, 0.3);
-    text-decoration: none;
-    color: white;
-}
-
-/* Info Panel */
-.info-panel {
-    color: white;
-    padding: 40px;
-}
-
-.info-title {
-    font-size: 2.5rem;
-    font-weight: 700;
-    margin-bottom: 20px;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-.info-subtitle {
-    font-size: 1.3rem;
-    margin-bottom: 40px;
-    opacity: 0.95;
-    line-height: 1.6;
-}
-
-.feature-list {
-    list-style: none;
-    padding: 0;
-    margin: 40px 0;
-}
-
-.feature-list li {
-    display: flex;
-    align-items: center;
-    margin-bottom: 20px;
-    font-size: 1.1rem;
-    opacity: 0.9;
-    padding: 15px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    backdrop-filter: blur(10px);
-    transition: all 0.3s ease;
-}
-
-.feature-list li:hover {
-    background: rgba(255, 255, 255, 0.2);
-    transform: translateX(10px);
-}
-
-.feature-list i {
-    color: #ffd700;
-    font-size: 1.4rem;
-    margin-right: 15px;
-    width: 25px;
-}
-
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 20px;
-    margin-top: 30px;
-}
-
-.stat-item {
-    text-align: center;
-    padding: 20px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 15px;
-    backdrop-filter: blur(10px);
-    transition: all 0.3s ease;
-}
-
-.stat-item:hover {
-    background: rgba(255, 255, 255, 0.2);
-    transform: translateY(-5px);
-}
-
-.stat-number {
-    font-size: 2.5rem;
-    font-weight: 700;
-    color: #ffd700;
-    display: block;
-    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-}
-
-.stat-label {
-    opacity: 0.9;
-    font-weight: 500;
-}
-
-/* Alerts */
-.alert {
-    padding: 20px 25px;
-    border-radius: 12px;
-    margin-bottom: 25px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-weight: 600;
-    animation: slideInDown 0.5s ease;
-}
-
-.alert i {
-    font-size: 1.3rem;
-}
-
-.alert-success {
-    background: linear-gradient(135deg, #d4edda, #c3e6cb);
-    color: #155724;
-    border: 2px solid #b8dacd;
-}
-
-.alert-error {
-    background: linear-gradient(135deg, #f8d7da, #f5c6cb);
-    color: #721c24;
-    border: 2px solid #f1b0b7;
-}
-
-/* Mobile Responsive */
-@media (max-width: 768px) {
-    .login-container {
-        grid-template-columns: 1fr;
-        gap: 30px;
-        padding: 15px;
-    }
-
-    .info-panel {
-        order: -1;
-        text-align: center;
-        padding: 30px 20px;
-    }
-
-    .login-card {
-        margin: 0 auto;
-    }
-
-    .login-body {
-        padding: 30px 25px;
-    }
-
-    .demo-grid {
-        gap: 12px;
-    }
-
-    .demo-item {
-        flex-direction: column;
-        text-align: center;
-        gap: 15px;
-    }
-
-    .demo-item-left {
-        justify-content: center;
-        flex-direction: column;
-        gap: 10px;
-    }
-
-    .form-options {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 15px;
-    }
-
-    .stats-grid {
-        grid-template-columns: 1fr;
-        gap: 15px;
-    }
-
-    .info-title {
-        font-size: 2rem;
-    }
-
-    .info-subtitle {
-        font-size: 1.1rem;
-    }
-}
-
-/* Animations */
 @keyframes spin {
     0% {
         transform: rotate(0deg);
@@ -703,123 +831,26 @@ include __DIR__ . '/../common/header.php';
         transform: rotate(360deg);
     }
 }
-
-@keyframes shake {
-
-    0%,
-    100% {
-        transform: translateX(0);
-    }
-
-    25% {
-        transform: translateX(-5px);
-    }
-
-    75% {
-        transform: translateX(5px);
-    }
-}
-
-@keyframes pulse {
-
-    0%,
-    100% {
-        transform: scale(1);
-        opacity: 1;
-    }
-
-    50% {
-        transform: scale(1.1);
-        opacity: 0.8;
-    }
-}
-
-@keyframes slideInDown {
-    from {
-        opacity: 0;
-        transform: translateY(-30px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-@keyframes fadeInUp {
-    from {
-        opacity: 0;
-        transform: translateY(30px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.fade-in-up {
-    animation: fadeInUp 0.6s ease-out;
-}
 </style>
 
 <div class="login-page">
+    <!-- Animated Background Shapes -->
+    <div class="shape shape-1"></div>
+    <div class="shape shape-2"></div>
+    <div class="shape shape-3"></div>
+
     <div class="login-container">
         <!-- Login Card -->
-        <div class="login-card fade-in-up">
+        <div class="login-card">
             <div class="login-header">
-                <h1>Welcome Back</h1>
-                <p>Sign in to your account to continue</p>
-            </div>
-            <div class="login-body">
-                <!-- Demo Credentials -->
-                <div class="demo-section">
-                    <div class="demo-title">
-                        <i class="fas fa-key"></i>
-                        Demo Login Credentials
-                    </div>
-                    <div class="demo-grid">
-                        <div class="demo-item" onclick="quickLogin('admin@petcare.com', 'admin123')">
-                            <div class="demo-item-left">
-                                <div class="demo-icon admin-icon">
-                                    <i class="fas fa-shield-alt"></i>
-                                </div>
-                                <div class="demo-info">
-                                    <h4>Administrator</h4>
-                                    <div class="demo-email">admin@petcare.com</div>
-                                </div>
-                            </div>
-                            <button type="button" class="demo-password">admin123</button>
-                        </div>
-
-                        <div class="demo-item" onclick="quickLogin('shelter@demo.com', 'shelter123')">
-                            <div class="demo-item-left">
-                                <div class="demo-icon shelter-icon">
-                                    <i class="fas fa-home"></i>
-                                </div>
-                                <div class="demo-info">
-                                    <h4>Shelter Manager</h4>
-                                    <div class="demo-email">shelter@demo.com</div>
-                                </div>
-                            </div>
-                            <button type="button" class="demo-password">shelter123</button>
-                        </div>
-
-                        <div class="demo-item" onclick="quickLogin('adopter@demo.com', 'adopter123')">
-                            <div class="demo-item-left">
-                                <div class="demo-icon adopter-icon">
-                                    <i class="fas fa-heart"></i>
-                                </div>
-                                <div class="demo-info">
-                                    <h4>Pet Adopter</h4>
-                                    <div class="demo-email">adopter@demo.com</div>
-                                </div>
-                            </div>
-                            <button type="button" class="demo-password">adopter123</button>
-                        </div>
-                    </div>
+                <div class="login-logo">
+                    <i class="fas fa-paw"></i>
                 </div>
+                <h1>Welcome Back</h1>
+                <p>Sign in to continue to Pet Care Platform</p>
+            </div>
 
+            <div class="login-body">
                 <!-- Alert Messages -->
                 <?php if ($success_message): ?>
                 <div class="alert alert-success">
@@ -838,28 +869,29 @@ include __DIR__ . '/../common/header.php';
                 <!-- Login Form -->
                 <form method="POST" id="loginForm" novalidate>
                     <div class="form-group">
-                        <label for="email" class="form-label">
-                            <i class="fas fa-envelope"></i>
-                            Email Address
-                        </label>
-                        <input type="email" id="email" name="email" class="form-input" required
-                            value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>"
-                            placeholder="Enter your email address">
+                        <label for="email" class="form-label">Email Address</label>
+                        <div class="input-wrapper">
+                            <input type="email" id="email" name="email" class="form-input" required
+                                value="<?php echo isset($_POST['email']) ? htmlspecialchars($_POST['email']) : ''; ?>"
+                                placeholder="Enter your email address">
+                            <i class="fas fa-envelope input-icon"></i>
+                        </div>
                     </div>
 
                     <div class="form-group">
-                        <label for="password" class="form-label">
-                            <i class="fas fa-lock"></i>
-                            Password
-                        </label>
-                        <input type="password" id="password" name="password" class="form-input" required
-                            placeholder="Enter your password">
+                        <label for="password" class="form-label">Password</label>
+                        <div class="input-wrapper">
+                            <input type="password" id="password" name="password" class="form-input" required
+                                placeholder="Enter your password">
+                            <i class="fas fa-lock input-icon"></i>
+                        </div>
                     </div>
 
                     <div class="form-options">
                         <label class="remember-me">
                             <input type="checkbox" name="remember_me" id="remember_me">
-                            Remember me for 30 days
+                            <span class="custom-checkbox"></span>
+                            <span class="remember-me-text">Remember me</span>
                         </label>
                         <a href="#" class="forgot-password" onclick="showForgotPassword()">
                             Forgot password?
@@ -871,84 +903,67 @@ include __DIR__ . '/../common/header.php';
                     </button>
                 </form>
 
+                <div class="divider">
+                    <span>OR</span>
+                </div>
+
                 <div class="register-link">
-                    <p>Don't have an account?</p>
-                    <a href="<?php echo $BASE_URL; ?>auth/register.php" class="btn-secondary">
-                        Create Account Now
+                    <p>Don't have an account yet?</p>
+                    <a href="<?php echo $BASE_URL; ?>auth/register.php" class="btn-register">
+                        <i class="fas fa-user-plus"></i> Create New Account
                     </a>
                 </div>
             </div>
         </div>
 
         <!-- Info Panel -->
-        <div class="info-panel fade-in-up">
-            <h1 class="info-title">Find Your Perfect Companion</h1>
-            <p class="info-subtitle">
-                Join thousands of families who have found their new best friend through our pet adoption platform.
-            </p>
+        <div class="info-panel">
+            <div class="info-content">
+                <div class="info-image">
+                    <img src="<?php echo $BASE_URL; ?>assets/images/login-illustration.svg" alt="Pet Adoption"
+                        onerror="this.style.display='none'">
+                </div>
 
-            <ul class="feature-list">
-                <li>
-                    <i class="fas fa-search"></i>
-                    Browse thousands of pets looking for homes
-                </li>
-                <li>
-                    <i class="fas fa-heart"></i>
-                    Connect with trusted shelters and rescues
-                </li>
-                <li>
-                    <i class="fas fa-shield-alt"></i>
-                    Safe and secure adoption process
-                </li>
-                <li>
-                    <i class="fas fa-users"></i>
-                    Join a community of pet lovers
-                </li>
-                <li>
-                    <i class="fas fa-book"></i>
-                    Access expert care guides and tips
-                </li>
-            </ul>
+                <h2 class="info-title">Find Your Perfect Companion</h2>
+                <p class="info-subtitle">
+                    Join our community of pet lovers and give a furry friend their forever home.
+                </p>
 
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <span class="stat-number">5000+</span>
-                    <span class="stat-label">Pets Adopted</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number">200+</span>
-                    <span class="stat-label">Partner Shelters</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number">10K+</span>
-                    <span class="stat-label">Happy Families</span>
-                </div>
-                <div class="stat-item">
-                    <span class="stat-number">24/7</span>
-                    <span class="stat-label">Support Available</span>
-                </div>
+                <ul class="feature-list">
+                    <li>
+                        <i class="fas fa-heart"></i>
+                        <span>Connect with trusted shelters</span>
+                    </li>
+                    <li>
+                        <i class="fas fa-search"></i>
+                        <span>Browse thousands of pets</span>
+                    </li>
+                    <li>
+                        <i class="fas fa-shield-alt"></i>
+                        <span>Safe & secure adoption process</span>
+                    </li>
+                    <li>
+                        <i class="fas fa-users"></i>
+                        <span>Join a caring community</span>
+                    </li>
+                </ul>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-// Login page JavaScript functionality
+// Enhanced Login Page JavaScript
 document.addEventListener('DOMContentLoaded', function() {
-    setupFormValidation();
-    setupQuickLogin();
-    addAnimations();
-});
-
-function setupFormValidation() {
     const form = document.getElementById('loginForm');
     const loginBtn = document.getElementById('loginBtn');
+    const emailInput = document.getElementById('email');
+    const passwordInput = document.getElementById('password');
 
-    if (!form) return;
-
+    // Form validation
     form.addEventListener('submit', function(e) {
-        const email = document.getElementById('email').value.trim();
-        const password = document.getElementById('password').value.trim();
+        const email = emailInput.value.trim();
+        const password = passwordInput.value.trim();
 
         // Clear previous errors
         document.querySelectorAll('.form-input').forEach(input => {
@@ -958,15 +973,15 @@ function setupFormValidation() {
         let hasErrors = false;
 
         if (!email) {
-            showInputError('email');
+            showError(emailInput, 'Email is required');
             hasErrors = true;
         } else if (!isValidEmail(email)) {
-            showInputError('email');
+            showError(emailInput, 'Please enter a valid email');
             hasErrors = true;
         }
 
         if (!password) {
-            showInputError('password');
+            showError(passwordInput, 'Password is required');
             hasErrors = true;
         }
 
@@ -977,220 +992,58 @@ function setupFormValidation() {
 
         // Show loading state
         loginBtn.classList.add('loading');
-        loginBtn.disabled = true;
-        loginBtn.textContent = 'Signing In...';
-
-        return true;
+        loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Signing In...';
     });
 
     // Real-time validation
-    document.getElementById('email').addEventListener('input', function() {
+    emailInput.addEventListener('input', function() {
         this.classList.remove('error');
-        if (this.value.trim() && isValidEmail(this.value.trim())) {
-            this.style.borderColor = '#27ae60';
-        }
     });
 
-    document.getElementById('password').addEventListener('input', function() {
+    passwordInput.addEventListener('input', function() {
         this.classList.remove('error');
-        if (this.value.trim()) {
-            this.style.borderColor = '#27ae60';
-        }
     });
-}
 
-function showInputError(fieldId) {
-    const field = document.getElementById(fieldId);
-    field.classList.add('error');
-    field.focus();
-}
+    // Show password toggle
+    const togglePassword = document.createElement('i');
+    togglePassword.className = 'fas fa-eye-slash';
+    togglePassword.style.cssText =
+        'position: absolute; right: 20px; top: 50%; transform: translateY(-50%); cursor: pointer; color: #95a5a6; transition: color 0.3s ease;';
 
-function isValidEmail(email) {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-}
+    passwordInput.parentElement.appendChild(togglePassword);
 
-function quickLogin(email, password) {
-    // Add ripple effect to clicked demo item
-    const clickedItem = event.currentTarget;
-    addRippleEffect(clickedItem);
+    togglePassword.addEventListener('click', function() {
+        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+        passwordInput.setAttribute('type', type);
+        this.className = type === 'password' ? 'fas fa-eye-slash' : 'fas fa-eye';
+    });
 
-    // Fill form fields with animation
+    // Helper functions
+    function showError(input, message) {
+        input.classList.add('error');
+        input.focus();
+    }
+
+    function isValidEmail(email) {
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    }
+
+    // Auto-hide alerts
     setTimeout(() => {
-        const emailField = document.getElementById('email');
-        const passwordField = document.getElementById('password');
-
-        // Clear fields first
-        emailField.value = '';
-        passwordField.value = '';
-
-        // Type animation effect
-        typeInField(emailField, email, () => {
-            typeInField(passwordField, password, () => {
-                // Highlight the login button
-                const loginBtn = document.getElementById('loginBtn');
-                loginBtn.style.animation = 'pulse 1s ease-in-out 3';
-
-                // Auto-focus login button
-                setTimeout(() => {
-                    loginBtn.focus();
-                    loginBtn.style.animation = '';
-                }, 1000);
-            });
+        const alerts = document.querySelectorAll('.alert');
+        alerts.forEach(alert => {
+            alert.style.opacity = '0';
+            alert.style.transform = 'translateY(-20px)';
+            setTimeout(() => alert.remove(), 500);
         });
-    }, 300);
-}
-
-function typeInField(field, text, callback) {
-    let i = 0;
-    const typeInterval = setInterval(() => {
-        if (i < text.length) {
-            field.value += text.charAt(i);
-            field.style.borderColor = '#667eea';
-            field.style.background = '#f0f8ff';
-            i++;
-        } else {
-            clearInterval(typeInterval);
-            setTimeout(() => {
-                field.style.borderColor = '#27ae60';
-                field.style.background = 'white';
-            }, 500);
-            if (callback) callback();
-        }
-    }, 50);
-}
-
-function addRippleEffect(element) {
-    const ripple = document.createElement('div');
-    const rect = element.getBoundingClientRect();
-    const size = Math.max(rect.width, rect.height);
-    const x = event.clientX - rect.left - size / 2;
-    const y = event.clientY - rect.top - size / 2;
-
-    ripple.style.width = ripple.style.height = size + 'px';
-    ripple.style.left = x + 'px';
-    ripple.style.top = y + 'px';
-    ripple.classList.add('ripple-effect');
-
-    ripple.style.position = 'absolute';
-    ripple.style.borderRadius = '50%';
-    ripple.style.background = 'rgba(102, 126, 234, 0.4)';
-    ripple.style.transform = 'scale(0)';
-    ripple.style.animation = 'ripple 0.6s linear';
-    ripple.style.pointerEvents = 'none';
-
-    element.style.position = 'relative';
-    element.style.overflow = 'hidden';
-    element.appendChild(ripple);
-
-    setTimeout(() => {
-        ripple.remove();
-    }, 600);
-}
-
-function setupQuickLogin() {
-    // Add keyboard shortcuts
-    document.addEventListener('keydown', function(e) {
-        if (e.ctrlKey && e.altKey) {
-            switch (e.key) {
-                case 'a':
-                    e.preventDefault();
-                    quickLogin('admin@petcare.com', 'admin123');
-                    break;
-                case 's':
-                    e.preventDefault();
-                    quickLogin('shelter@demo.com', 'shelter123');
-                    break;
-                case 'd':
-                    e.preventDefault();
-                    quickLogin('adopter@demo.com', 'adopter123');
-                    break;
-            }
-        }
-    });
-}
-
-function addAnimations() {
-    // Animate stats on scroll
-    const statNumbers = document.querySelectorAll('.stat-number');
-    const observer = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                animateNumber(entry.target);
-                observer.unobserve(entry.target);
-            }
-        });
-    }, {
-        threshold: 0.5
-    });
-
-    statNumbers.forEach(stat => observer.observe(stat));
-
-    // Add floating animation to feature icons
-    const featureIcons = document.querySelectorAll('.feature-list i');
-    featureIcons.forEach((icon, index) => {
-        icon.style.animation = `float 3s ease-in-out infinite ${index * 0.2}s`;
-    });
-}
-
-function animateNumber(element) {
-    const text = element.textContent;
-    const number = parseInt(text.replace(/[^0-9]/g, ''));
-
-    if (isNaN(number)) return;
-
-    const suffix = text.replace(/[0-9]/g, '');
-    let current = 0;
-    const increment = number / 50;
-
-    const timer = setInterval(() => {
-        current += increment;
-        if (current >= number) {
-            element.textContent = number.toLocaleString() + suffix;
-            clearInterval(timer);
-        } else {
-            element.textContent = Math.floor(current).toLocaleString() + suffix;
-        }
-    }, 30);
-}
+    }, 5000);
+});
 
 function showForgotPassword() {
     alert(
-        'Password Reset:\n\nFor demo purposes, use the provided credentials above.\n\nIn a real application, this would:\n• Ask for your email address\n• Send a reset link to your email\n• Allow you to set a new password\n\nContact: admin@petcare.com');
+        'Password reset functionality would be implemented here.\n\nTypically this would:\n• Ask for your email\n• Send a reset link\n• Allow you to set a new password'
+    );
 }
-
-// Auto-hide alerts after 5 seconds
-setTimeout(() => {
-    const alerts = document.querySelectorAll('.alert');
-    alerts.forEach(alert => {
-        alert.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
-        alert.style.opacity = '0';
-        alert.style.transform = 'translateY(-20px)';
-        setTimeout(() => alert.remove(), 500);
-    });
-}, 5000);
-
-// Add ripple animation CSS
-const style = document.createElement('style');
-style.textContent = `
-    @keyframes ripple {
-        to {
-            transform: scale(4);
-            opacity: 0;
-        }
-    }
-    @keyframes float {
-        0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-10px); }
-    }
-`;
-document.head.appendChild(style);
-
-console.log('Login page loaded successfully');
-console.log('Demo credentials:');
-console.log('Admin: admin@petcare.com / admin123 (Ctrl+Alt+A)');
-console.log('Shelter: shelter@demo.com / shelter123 (Ctrl+Alt+S)');
-console.log('Adopter: adopter@demo.com / adopter123 (Ctrl+Alt+D)');
 </script>
 
 <?php include __DIR__ . '/../common/footer.php'; ?>

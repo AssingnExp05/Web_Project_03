@@ -8,13 +8,30 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// Define BASE_URL if not already defined
+// Define BASE_URL if not already defined - FIXED VERSION
 if (!defined('BASE_URL')) {
     $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
     $host = $_SERVER['HTTP_HOST'];
-    $scriptName = $_SERVER['SCRIPT_NAME'];
-    $path = str_replace(basename($scriptName), '', $scriptName);
-    define('BASE_URL', $protocol . $host . $path);
+    
+    // Get the base directory name (pet_care or your project folder)
+    $scriptPath = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME']));
+    $pathParts = explode('/', trim($scriptPath, '/'));
+    
+    // Find the project root (pet_care)
+    $projectRoot = '';
+    foreach ($pathParts as $part) {
+        if ($part === 'pet_care' || $part === 'PetAdoptionCareGuide') { // Add your project folder name
+            $projectRoot = '/' . $part . '/';
+            break;
+        }
+    }
+    
+    // If project root not found, use the first directory
+    if (empty($projectRoot) && !empty($pathParts[0])) {
+        $projectRoot = '/' . $pathParts[0] . '/';
+    }
+    
+    define('BASE_URL', $protocol . $host . $projectRoot);
 }
 
 // Get current page information
@@ -27,7 +44,11 @@ $user_type = $_SESSION['user_type'] ?? null;
 $user_id = $_SESSION['user_id'] ?? null;
 $user_info = null;
 
-if ($is_logged_in && $user_id) {
+// Get database connection
+$database = Database::getInstance();
+$pdo = $database->getConnection();
+
+if ($is_logged_in && $user_id && $pdo) {
     try {
         $stmt = $pdo->prepare("SELECT first_name, last_name, email FROM users WHERE user_id = ?");
         $stmt->execute([$user_id]);
@@ -40,6 +61,11 @@ if ($is_logged_in && $user_id) {
 // Function to check if a menu item is active
 function isActive($page, $current) {
     return strpos($current, $page) !== false ? 'active' : '';
+}
+
+// Function to generate correct URL
+function url($path) {
+    return BASE_URL . ltrim($path, '/');
 }
 ?>
 
@@ -67,12 +93,12 @@ function isActive($page, $current) {
     <meta property="og:title" content="<?php echo isset($page_title) ? $page_title : 'Pet Adoption Care Guide'; ?>">
     <meta property="og:description" content="Find your perfect companion and give a pet a loving home.">
     <meta property="og:type" content="website">
-    <meta property="og:url" content="<?php echo BASE_URL . $current_page; ?>">
-    <meta property="og:image" content="<?php echo BASE_URL; ?>uploads/og-image.jpg">
+    <meta property="og:url" content="<?php echo url($current_page); ?>">
+    <meta property="og:image" content="<?php echo url('assets/images/og-image.jpg'); ?>">
 
     <!-- Favicon -->
-    <link rel="icon" type="image/x-icon" href="<?php echo BASE_URL; ?>assets/favicon.ico">
-    <link rel="apple-touch-icon" sizes="180x180" href="<?php echo BASE_URL; ?>assets/apple-touch-icon.png">
+    <link rel="icon" type="image/x-icon" href="<?php echo url('assets/favicon.ico'); ?>">
+    <link rel="apple-touch-icon" sizes="180x180" href="<?php echo url('assets/apple-touch-icon.png'); ?>">
 
     <!-- External CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -291,7 +317,6 @@ function isActive($page, $current) {
 
     .nav-link.active {
         color: var(--primary-color);
-        background: var(--primary-color);
         background: linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(236, 72, 153, 0.1));
     }
 
@@ -371,6 +396,7 @@ function isActive($page, $current) {
         border-radius: 50px;
         background: var(--gray-50);
         transition: all var(--transition-base);
+        cursor: pointer;
     }
 
     .user-profile:hover {
@@ -868,7 +894,7 @@ function isActive($page, $current) {
     <header class="header" id="header">
         <div class="header-container">
             <!-- Logo -->
-            <a href="<?php echo BASE_URL; ?>index.php" class="logo">
+            <a href="<?php echo url('index.php'); ?>" class="logo">
                 <div class="logo-icon">
                     <i class="fas fa-paw"></i>
                 </div>
@@ -881,46 +907,45 @@ function isActive($page, $current) {
             <nav class="nav" id="nav">
                 <ul class="nav-menu">
                     <li class="nav-item">
-                        <a href="<?php echo BASE_URL; ?>index.php"
+                        <a href="<?php echo url('index.php'); ?>"
                             class="nav-link <?php echo isActive('index.php', $current_page); ?>">
                             <i class="fas fa-home"></i> Home
                         </a>
                     </li>
 
                     <li class="nav-item">
-                        <a href="<?php echo BASE_URL; ?>about.php"
+                        <a href="<?php echo url('about.php'); ?>"
                             class="nav-link <?php echo isActive('about.php', $current_page); ?>">
                             <i class="fas fa-info-circle"></i> About
                         </a>
                     </li>
 
                     <li class="nav-item dropdown">
-                        <a href="<?php echo BASE_URL; ?>adopter/browsePets.php"
+                        <a href="<?php echo url('adopter/browsePets.php'); ?>"
                             class="nav-link dropdown-toggle <?php echo isActive('browsePets', $current_page); ?>">
                             <i class="fas fa-search"></i> Find Pets
                         </a>
                         <div class="dropdown-menu">
-                            <a href="<?php echo BASE_URL; ?>adopter/browsePets.php" class="dropdown-item">
+                            <a href="<?php echo url('adopter/browsePets.php'); ?>" class="dropdown-item">
                                 <i class="fas fa-list"></i> Browse All Pets
                             </a>
-                            <a href="<?php echo BASE_URL; ?>adopter/browsePets.php?category=dog" class="dropdown-item">
+                            <a href="<?php echo url('adopter/browsePets.php?category=dog'); ?>" class="dropdown-item">
                                 <i class="fas fa-dog"></i> Dogs
                             </a>
-                            <a href="<?php echo BASE_URL; ?>adopter/browsePets.php?category=cat" class="dropdown-item">
+                            <a href="<?php echo url('adopter/browsePets.php?category=cat'); ?>" class="dropdown-item">
                                 <i class="fas fa-cat"></i> Cats
                             </a>
-                            <a href="<?php echo BASE_URL; ?>adopter/browsePets.php?category=bird" class="dropdown-item">
+                            <a href="<?php echo url('adopter/browsePets.php?category=bird'); ?>" class="dropdown-item">
                                 <i class="fas fa-dove"></i> Birds
                             </a>
-                            <a href="<?php echo BASE_URL; ?>adopter/browsePets.php?category=other"
-                                class="dropdown-item">
+                            <a href="<?php echo url('adopter/browsePets.php?category=other'); ?>" class="dropdown-item">
                                 <i class="fas fa-otter"></i> Other Pets
                             </a>
                         </div>
                     </li>
 
                     <li class="nav-item">
-                        <a href="<?php echo BASE_URL; ?>adopter/careGuides.php"
+                        <a href="<?php echo url('adopter/careGuides.php'); ?>"
                             class="nav-link <?php echo isActive('careGuides', $current_page); ?>">
                             <i class="fas fa-book"></i> Care Guides
                         </a>
@@ -928,7 +953,7 @@ function isActive($page, $current) {
 
                     <?php if ($is_logged_in && $user_type === 'shelter'): ?>
                     <li class="nav-item">
-                        <a href="<?php echo BASE_URL; ?>shelter/dashboard.php"
+                        <a href="<?php echo url('shelter/dashboard.php'); ?>"
                             class="nav-link <?php echo isActive('shelter', $current_dir); ?>">
                             <i class="fas fa-building"></i> Shelter Portal
                         </a>
@@ -936,7 +961,7 @@ function isActive($page, $current) {
                     <?php endif; ?>
 
                     <li class="nav-item">
-                        <a href="<?php echo BASE_URL; ?>contact.php"
+                        <a href="<?php echo url('contact.php'); ?>"
                             class="nav-link <?php echo isActive('contact.php', $current_page); ?>">
                             <i class="fas fa-envelope"></i> Contact
                         </a>
@@ -956,45 +981,45 @@ function isActive($page, $current) {
                         </div>
                         <div class="dropdown-menu">
                             <?php if ($user_type === 'admin'): ?>
-                            <a href="<?php echo BASE_URL; ?>admin/dashboard.php" class="dropdown-item">
+                            <a href="<?php echo url('admin/dashboard.php'); ?>" class="dropdown-item">
                                 <i class="fas fa-tachometer-alt"></i> Admin Dashboard
                             </a>
-                            <a href="<?php echo BASE_URL; ?>admin/manageUsers.php" class="dropdown-item">
+                            <a href="<?php echo url('admin/manageUsers.php'); ?>" class="dropdown-item">
                                 <i class="fas fa-users"></i> Manage Users
                             </a>
-                            <a href="<?php echo BASE_URL; ?>admin/reports.php" class="dropdown-item">
+                            <a href="<?php echo url('admin/reports.php'); ?>" class="dropdown-item">
                                 <i class="fas fa-chart-bar"></i> Reports
                             </a>
                             <?php elseif ($user_type === 'shelter'): ?>
-                            <a href="<?php echo BASE_URL; ?>shelter/dashboard.php" class="dropdown-item">
+                            <a href="<?php echo url('shelter/dashboard.php'); ?>" class="dropdown-item">
                                 <i class="fas fa-tachometer-alt"></i> Shelter Dashboard
                             </a>
-                            <a href="<?php echo BASE_URL; ?>shelter/viewPets.php" class="dropdown-item">
+                            <a href="<?php echo url('shelter/viewPets.php'); ?>" class="dropdown-item">
                                 <i class="fas fa-paw"></i> My Pets
                             </a>
-                            <a href="<?php echo BASE_URL; ?>shelter/adoptionRequests.php" class="dropdown-item">
+                            <a href="<?php echo url('shelter/adoptionRequests.php'); ?>" class="dropdown-item">
                                 <i class="fas fa-file-alt"></i> Adoption Requests
                             </a>
                             <?php else: ?>
-                            <a href="<?php echo BASE_URL; ?>adopter/dashboard.php" class="dropdown-item">
+                            <a href="<?php echo url('adopter/dashboard.php'); ?>" class="dropdown-item">
                                 <i class="fas fa-tachometer-alt"></i> My Dashboard
                             </a>
-                            <a href="<?php echo BASE_URL; ?>adopter/myAdoptions.php" class="dropdown-item">
+                            <a href="<?php echo url('adopter/myAdoptions.php'); ?>" class="dropdown-item">
                                 <i class="fas fa-heart"></i> My Adoptions
                             </a>
                             <?php endif; ?>
                             <hr style="margin: 8px 0; border: none; border-top: 1px solid var(--gray-200);">
-                            <a href="<?php echo BASE_URL; ?>auth/logout.php" class="dropdown-item">
+                            <a href="<?php echo url('auth/logout.php'); ?>" class="dropdown-item">
                                 <i class="fas fa-sign-out-alt"></i> Logout
                             </a>
                         </div>
                     </div>
                     <?php else: ?>
                     <div class="auth-buttons">
-                        <a href="<?php echo BASE_URL; ?>auth/login.php" class="btn btn-outline">
+                        <a href="<?php echo url('auth/login.php'); ?>" class="btn btn-outline">
                             <i class="fas fa-sign-in-alt"></i> Login
                         </a>
-                        <a href="<?php echo BASE_URL; ?>auth/register.php" class="btn btn-primary">
+                        <a href="<?php echo url('auth/register.php'); ?>" class="btn btn-primary">
                             <i class="fas fa-user-plus"></i> Register
                         </a>
                     </div>
@@ -1057,6 +1082,9 @@ function isActive($page, $current) {
 
         <!-- JavaScript -->
         <script>
+        // Base URL for JavaScript
+        const BASE_URL = '<?php echo BASE_URL; ?>';
+
         // Progress Bar
         document.addEventListener('DOMContentLoaded', function() {
             const progressBar = document.getElementById('progressBar');
@@ -1125,14 +1153,15 @@ function isActive($page, $current) {
         dropdowns.forEach(dropdown => {
             const toggle = dropdown.querySelector('.dropdown-toggle');
 
-            toggle.addEventListener('click', function(e) {
-                if (window.innerWidth <= 768) {
-                    e.preventDefault();
-                    dropdown.classList.toggle('active');
-                }
-            });
+            if (toggle) {
+                toggle.addEventListener('click', function(e) {
+                    if (window.innerWidth <= 768) {
+                        e.preventDefault();
+                        dropdown.classList.toggle('active');
+                    }
+                });
+            }
         });
-
 
         // Close notification
         function closeNotification() {
@@ -1367,7 +1396,7 @@ function isActive($page, $current) {
         // Error handling for broken images
         document.querySelectorAll('img').forEach(img => {
             img.addEventListener('error', function() {
-                this.src = '<?php echo BASE_URL; ?>assets/placeholder.jpg';
+                this.src = BASE_URL + 'assets/images/placeholder.jpg';
                 this.alt = 'Image not available';
             });
         });
@@ -1382,7 +1411,26 @@ function isActive($page, $current) {
         function init() {
             // Any additional initialization code
             console.log('Header initialized successfully');
+            console.log('Base URL:', BASE_URL);
         }
+
+        // Helper function to generate correct URLs
+        function url(path) {
+            return BASE_URL + path.replace(/^\//, '');
+        }
+
+        // Update all links dynamically if needed
+        function updateLinks() {
+            document.querySelectorAll('a[href^="/"]').forEach(link => {
+                const path = link.getAttribute('href');
+                if (!path.startsWith(BASE_URL)) {
+                    link.setAttribute('href', url(path));
+                }
+            });
+        }
+
+        // Call updateLinks if needed
+        // updateLinks();
         </script>
 
         <!-- End of header.php -->

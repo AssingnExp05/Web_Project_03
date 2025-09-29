@@ -6,6 +6,9 @@ require_once 'config/db.php';
 $page_title = "Home";
 $page_description = "Find your perfect companion at Pet Adoption Care Guide. Browse adoptable pets from trusted shelters and give a pet a loving forever home.";
 
+// Check if user is logged in
+$isLoggedIn = isset($_SESSION['user_id']);
+
 // Initialize statistics with default values
 $stats = [
     'pets_available' => 0,
@@ -14,75 +17,106 @@ $stats = [
     'happy_families' => 0
 ];
 
-// Get statistics for homepage using DBHelper
-$stats['pets_available'] = DBHelper::count('pets', ['status' => 'available']);
-$stats['successful_adoptions'] = DBHelper::count('adoptions');
-$stats['shelters'] = DBHelper::count('shelters');
-$stats['happy_families'] = $stats['successful_adoptions'];
+try {
+    // Get statistics for homepage
+    $stats['pets_available'] = DBHelper::count('pets', ['status' => 'available']);
+    $stats['successful_adoptions'] = DBHelper::count('adoptions');
+    $stats['shelters'] = DBHelper::count('shelters');
+    $stats['happy_families'] = $stats['successful_adoptions'];
+} catch (Exception $e) {
+    error_log("Error fetching stats: " . $e->getMessage());
+}
 
-// Get featured pets (latest 8 available pets)
-$featured_pets = DBHelper::select("
-    SELECT 
-        p.pet_id,
-        p.pet_name,
-        p.age,
-        p.gender,
-        p.size,
-        p.description,
-        p.primary_image,
-        p.adoption_fee,
-        p.created_at,
-        pc.category_name,
-        pb.breed_name,
-        s.shelter_name,
-        DATEDIFF(CURRENT_DATE, p.created_at) as days_waiting
-    FROM pets p 
-    LEFT JOIN pet_categories pc ON p.category_id = pc.category_id 
-    LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id 
-    LEFT JOIN shelters s ON p.shelter_id = s.shelter_id 
-    WHERE p.status = 'available' 
-    ORDER BY p.created_at DESC 
-    LIMIT 8
-");
+try {
+    // Get featured pets with proper image handling
+    $featured_pets = DBHelper::select("
+        SELECT 
+            p.pet_id,
+            p.pet_name,
+            p.age,
+            p.gender,
+            p.size,
+            p.description,
+            p.adoption_fee,
+            p.created_at,
+            pc.category_name,
+            pb.breed_name,
+            s.shelter_name,
+            COALESCE(pi.image_path, p.primary_image) as pet_image,
+            DATEDIFF(CURRENT_DATE, p.created_at) as days_waiting
+        FROM pets p 
+        LEFT JOIN pet_categories pc ON p.category_id = pc.category_id 
+        LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id 
+        LEFT JOIN shelters s ON p.shelter_id = s.shelter_id 
+        LEFT JOIN (
+            SELECT pet_id, image_path 
+            FROM pet_images 
+            WHERE is_primary = 1 
+            GROUP BY pet_id
+        ) pi ON p.pet_id = pi.pet_id
+        WHERE p.status = 'available' 
+        ORDER BY p.created_at DESC 
+        LIMIT 8
+    ");
+} catch (Exception $e) {
+    error_log("Error fetching featured pets: " . $e->getMessage());
+    $featured_pets = [];
+}
 
-// Get recent success stories
-$success_stories = DBHelper::select("
-    SELECT 
-        a.adoption_id,
-        a.adoption_date,
-        p.pet_name,
-        p.primary_image,
-        u.first_name,
-        u.last_name,
-        s.shelter_name,
-        pc.category_name
-    FROM adoptions a
-    INNER JOIN pets p ON a.pet_id = p.pet_id
-    INNER JOIN users u ON a.adopter_id = u.user_id
-    INNER JOIN shelters s ON a.shelter_id = s.shelter_id
-    INNER JOIN pet_categories pc ON p.category_id = pc.category_id
-    ORDER BY a.adoption_date DESC
-    LIMIT 6
-");
+try {
+    // Get recent success stories
+    $success_stories = DBHelper::select("
+        SELECT 
+            a.adoption_id,
+            a.adoption_date,
+            p.pet_name,
+            COALESCE(pi.image_path, p.primary_image) as pet_image,
+            u.first_name,
+            u.last_name,
+            s.shelter_name,
+            pc.category_name
+        FROM adoptions a
+        INNER JOIN pets p ON a.pet_id = p.pet_id
+        INNER JOIN users u ON a.adopter_id = u.user_id
+        INNER JOIN shelters s ON a.shelter_id = s.shelter_id
+        INNER JOIN pet_categories pc ON p.category_id = pc.category_id
+        LEFT JOIN (
+            SELECT pet_id, image_path 
+            FROM pet_images 
+            WHERE is_primary = 1 
+            GROUP BY pet_id
+        ) pi ON p.pet_id = pi.pet_id
+        ORDER BY a.adoption_date DESC
+        LIMIT 6
+    ");
+} catch (Exception $e) {
+    error_log("Error fetching success stories: " . $e->getMessage());
+    $success_stories = [];
+}
 
-// Get latest care guides
-$latest_guides = DBHelper::select("
-    SELECT 
-        cg.guide_id,
-        cg.title,
-        cg.content,
-        cg.difficulty_level,
-        cg.created_at,
-        pc.category_name,
-        u.first_name,
-        u.last_name
-    FROM care_guides cg
-    INNER JOIN pet_categories pc ON cg.category_id = pc.category_id
-    INNER JOIN users u ON cg.author_id = u.user_id
-    WHERE cg.is_published = 1
-    ORDER BY cg.created_at DESC
-    LIMIT 4
-");
+try {
+    // Get latest care guides
+    $latest_guides = DBHelper::select("
+        SELECT 
+            cg.guide_id,
+            cg.title,
+            cg.content,
+            cg.difficulty_level,
+            cg.created_at,
+            pc.category_name,
+            u.first_name,
+            u.last_name
+        FROM care_guides cg
+        INNER JOIN pet_categories pc ON cg.category_id = pc.category_id
+        INNER JOIN users u ON cg.author_id = u.user_id
+        WHERE cg.is_published = 1
+        ORDER BY cg.created_at DESC
+        LIMIT 4
+    ");
+} catch (Exception $e) {
+    error_log("Error fetching care guides: " . $e->getMessage());
+    $latest_guides = [];
+}
 
 // Ensure arrays if queries failed
 $featured_pets = $featured_pets ?: [];
@@ -90,25 +124,36 @@ $success_stories = $success_stories ?: [];
 $latest_guides = $latest_guides ?: [];
 
 // Helper function to get proper image URL
-function getImageUrl($imageName, $type = 'pets') {
-    if (empty($imageName)) {
-        return BASE_URL . 'assets/images/pet-placeholder.jpg';
+function getPetImageUrl($imagePath) {
+    // Default placeholder
+    $placeholder = 'assets/images/pet-placeholder.jpg';
+    
+    if (empty($imagePath)) {
+        return $placeholder;
     }
     
-    // Remove any leading/trailing slashes
-    $imageName = trim($imageName, '/\\');
+    // Clean the image path
+    $imagePath = trim($imagePath);
     
-    // Build the image path
-    $imagePath = "uploads/{$type}/" . $imageName;
+    // Check if it's already a full path
+    if (strpos($imagePath, 'uploads/') === 0) {
+        $fullPath = $imagePath;
+    } else {
+        $fullPath = 'uploads/pets/' . $imagePath;
+    }
     
-    // Check if file exists (adjust path based on your server setup)
-    $fullPath = $_SERVER['DOCUMENT_ROOT'] . str_replace('http://localhost', '', BASE_URL) . $imagePath;
-    
+    // Check if file exists
     if (file_exists($fullPath)) {
-        return BASE_URL . $imagePath;
+        return $fullPath;
     }
     
-    return BASE_URL . 'assets/images/pet-placeholder.jpg';
+    // Check alternative path
+    $altPath = 'uploads/pets/' . basename($imagePath);
+    if (file_exists($altPath)) {
+        return $altPath;
+    }
+    
+    return $placeholder;
 }
 
 include 'common/header.php';
@@ -151,7 +196,14 @@ include 'common/header.php';
     --transition-slow: 500ms ease;
 }
 
-/* Hero Section with Video Background */
+/* Reset and base styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Hero Section with Image Background */
 .hero-section {
     position: relative;
     height: 100vh;
@@ -160,50 +212,12 @@ include 'common/header.php';
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--gradient-primary);
+    background: url('assets/images/paw1.jpg') center center/cover no-repeat;
+    background-attachment: fixed;
 }
 
-.hero-videos {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    display: flex;
-    z-index: 0;
-}
-
-.video-container {
-    flex: 1;
-    position: relative;
-    overflow: hidden;
-}
-
-.video-container:first-child::after {
+.hero-section::before {
     content: '';
-    position: absolute;
-    top: 0;
-    right: -1px;
-    width: 4px;
-    height: 100%;
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-    z-index: 2;
-}
-
-.hero-video {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    min-width: 100%;
-    min-height: 100%;
-    width: auto;
-    height: auto;
-    transform: translate(-50%, -50%);
-    object-fit: cover;
-}
-
-.hero-overlay {
     position: absolute;
     top: 0;
     left: 0;
@@ -280,6 +294,8 @@ include 'common/header.php';
     overflow: hidden;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    border: none;
+    cursor: pointer;
 }
 
 .hero-btn::before {
@@ -309,6 +325,8 @@ include 'common/header.php';
     background: rgba(255, 255, 255, 0.3);
     transform: translateY(-3px);
     box-shadow: 0 15px 40px rgba(0, 0, 0, 0.2);
+    color: white;
+    text-decoration: none;
 }
 
 .hero-btn-secondary {
@@ -322,6 +340,8 @@ include 'common/header.php';
     background: rgba(255, 255, 255, 0.2);
     border-color: rgba(255, 255, 255, 0.5);
     transform: translateY(-3px);
+    color: white;
+    text-decoration: none;
 }
 
 .hero-scroll {
@@ -347,36 +367,8 @@ include 'common/header.php';
 
 .hero-scroll a:hover {
     opacity: 1;
-}
-
-/* Video Controls */
-.video-controls {
-    position: absolute;
-    bottom: 30px;
-    right: 30px;
-    z-index: 3;
-    display: flex;
-    gap: 10px;
-}
-
-.video-control-btn {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.2);
-    backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.3);
+    text-decoration: none;
     color: white;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all var(--transition-base);
-}
-
-.video-control-btn:hover {
-    background: rgba(255, 255, 255, 0.3);
-    transform: scale(1.1);
 }
 
 /* Statistics Section */
@@ -568,10 +560,80 @@ include 'common/header.php';
     height: 100%;
     object-fit: cover;
     transition: transform var(--transition-slow);
+    display: block;
 }
 
 .pet-card:hover .pet-image img {
-    transform: scale(1.1);
+    transform: scale(1.05);
+}
+
+.pet-image-placeholder {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #9ca3af;
+    font-size: 4rem;
+}
+
+/* Login overlay for pet images */
+.login-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(5px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    visibility: hidden;
+    transition: all var(--transition-base);
+    z-index: 10;
+}
+
+.pet-card:hover .login-overlay {
+    opacity: 1;
+    visibility: visible;
+}
+
+.login-overlay-content {
+    text-align: center;
+    color: white;
+    padding: 20px;
+}
+
+.login-overlay-icon {
+    font-size: 3rem;
+    margin-bottom: 15px;
+    animation: pulse 2s infinite;
+}
+
+.login-overlay-text {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 15px;
+}
+
+.login-overlay-link {
+    background: white;
+    color: var(--primary);
+    padding: 10px 25px;
+    border-radius: 25px;
+    text-decoration: none;
+    font-weight: 600;
+    transition: all var(--transition-base);
+    display: inline-block;
+}
+
+.login-overlay-link:hover {
+    background: var(--primary);
+    color: white;
+    transform: scale(1.05);
+    text-decoration: none;
 }
 
 .pet-badges {
@@ -582,6 +644,7 @@ include 'common/header.php';
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
+    z-index: 2;
 }
 
 .pet-category {
@@ -662,6 +725,7 @@ include 'common/header.php';
     margin-bottom: 25px;
     display: -webkit-box;
     -webkit-line-clamp: 3;
+    line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
@@ -698,9 +762,41 @@ include 'common/header.php';
 .pet-action:hover {
     transform: translateY(-2px);
     box-shadow: 0 10px 20px rgba(99, 102, 241, 0.3);
+    color: white;
+    text-decoration: none;
 }
 
-/* Success Stories */
+/* Blur effect for non-logged in users */
+.blur-content {
+    filter: blur(3px);
+    user-select: none;
+    pointer-events: none;
+}
+
+/* Empty state styles */
+.empty-state {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 80px 20px;
+}
+
+.empty-state i {
+    font-size: 5rem;
+    color: #e5e7eb;
+    margin-bottom: 20px;
+}
+
+.empty-state h3 {
+    color: #6b7280;
+    font-size: 1.5rem;
+    margin-bottom: 10px;
+}
+
+.empty-state p {
+    color: #9ca3af;
+}
+
+/* Success Stories Section */
 .success-stories {
     background: white;
     position: relative;
@@ -770,10 +866,12 @@ include 'common/header.php';
     border: 3px solid #6366f1;
     position: relative;
     flex-shrink: 0;
-    background-color: #f3f4f6;
+    background: linear-gradient(135deg, #6366f1, #ec4899);
     display: flex;
     align-items: center;
     justify-content: center;
+    color: white;
+    font-size: 24px;
 }
 
 .story-avatar img {
@@ -781,12 +879,6 @@ include 'common/header.php';
     height: 100%;
     object-fit: cover;
     display: block;
-}
-
-.story-avatar.placeholder {
-    background: linear-gradient(135deg, #6366f1, #ec4899);
-    color: white;
-    font-size: 24px;
 }
 
 .story-info h4 {
@@ -801,7 +893,7 @@ include 'common/header.php';
     font-size: 0.9rem;
 }
 
-/* Care Guides */
+/* Care Guides Section */
 .care-guides {
     background: #f9fafb;
 }
@@ -900,6 +992,7 @@ include 'common/header.php';
 
 .guide-link:hover {
     gap: 10px;
+    text-decoration: none;
 }
 
 /* How It Works Section */
@@ -1098,12 +1191,8 @@ include 'common/header.php';
 
 /* Responsive Design */
 @media (max-width: 768px) {
-    .hero-videos {
-        flex-direction: column;
-    }
-
-    .video-container:first-child::after {
-        display: none;
+    .hero-section {
+        background-attachment: scroll;
     }
 
     .hero-title {
@@ -1146,11 +1235,6 @@ include 'common/header.php';
         font-size: 2.5rem;
     }
 
-    .video-controls {
-        bottom: 80px;
-        right: 20px;
-    }
-
     .story-card {
         padding: 30px;
     }
@@ -1163,28 +1247,41 @@ include 'common/header.php';
         font-size: 1.1rem;
     }
 }
+
+/* Loading states */
+.loading {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+/* Image loading indicator */
+.pet-image.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 40px;
+    border: 3px solid #f3f4f6;
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% {
+        transform: translate(-50%, -50%) rotate(0deg);
+    }
+
+    100% {
+        transform: translate(-50%, -50%) rotate(360deg);
+    }
+}
 </style>
 
-<!-- Hero Section with Multiple Video Backgrounds -->
+<!-- Hero Section with Image Background -->
 <section class="hero-section">
-    <div class="hero-videos">
-        <!-- Dog Video -->
-        <div class="video-container">
-            <video class="hero-video" id="video1" autoplay muted loop playsinline>
-                <source src="video/dog1.mp4" type="video/mp4">
-                Your browser does not support the video tag.
-            </video>
-        </div>
-        <!-- Cat Video -->
-        <div class="video-container">
-            <video class="hero-video" id="video2" autoplay muted loop playsinline>
-                <source src="video/cat1.mp4" type="video/mp4">
-                Your browser does not support the video tag.
-            </video>
-        </div>
-    </div>
-    <div class="hero-overlay"></div>
-
     <div class="hero-content">
         <div class="hero-badge">
             <i class="fas fa-heart"></i> Save a Life Today
@@ -1195,10 +1292,17 @@ include 'common/header.php';
             their best friends through our platform. Your new family member is waiting for you.
         </p>
         <div class="hero-buttons">
-            <a href="<?php echo BASE_URL; ?>adopter/browsePets.php" class="hero-btn hero-btn-primary">
+            <?php if ($isLoggedIn): ?>
+            <a href="adopter/browsePets.php" class="hero-btn hero-btn-primary">
                 <i class="fas fa-paw"></i>
                 Browse Pets
             </a>
+            <?php else: ?>
+            <a href="auth/login.php" class="hero-btn hero-btn-primary">
+                <i class="fas fa-sign-in-alt"></i>
+                Login to Browse
+            </a>
+            <?php endif; ?>
             <a href="#how-it-works" class="hero-btn hero-btn-secondary">
                 <i class="fas fa-info-circle"></i>
                 Learn More
@@ -1212,16 +1316,6 @@ include 'common/header.php';
             <i class="fas fa-chevron-down"></i>
         </a>
     </div>
-
-    <!-- Video Controls -->
-    <div class="video-controls">
-        <button class="video-control-btn" onclick="toggleMute()" title="Toggle Sound">
-            <i class="fas fa-volume-mute" id="muteIcon"></i>
-        </button>
-        <button class="video-control-btn" onclick="togglePlay()" title="Play/Pause">
-            <i class="fas fa-pause" id="playIcon"></i>
-        </button>
-    </div>
 </section>
 
 <!-- Statistics Section -->
@@ -1231,7 +1325,7 @@ include 'common/header.php';
             <div class="stat-icon">
                 <i class="fas fa-paw"></i>
             </div>
-            <span class="stat-number" data-count="<?php echo $stats['pets_available']; ?>">0</span>
+            <span class="stat-number" data-count="<?php echo intval($stats['pets_available']); ?>">0</span>
             <span class="stat-label">Pets Available</span>
         </div>
 
@@ -1239,7 +1333,7 @@ include 'common/header.php';
             <div class="stat-icon">
                 <i class="fas fa-heart"></i>
             </div>
-            <span class="stat-number" data-count="<?php echo $stats['successful_adoptions']; ?>">0</span>
+            <span class="stat-number" data-count="<?php echo intval($stats['successful_adoptions']); ?>">0</span>
             <span class="stat-label">Happy Adoptions</span>
         </div>
 
@@ -1247,7 +1341,7 @@ include 'common/header.php';
             <div class="stat-icon">
                 <i class="fas fa-home"></i>
             </div>
-            <span class="stat-number" data-count="<?php echo $stats['shelters']; ?>">0</span>
+            <span class="stat-number" data-count="<?php echo intval($stats['shelters']); ?>">0</span>
             <span class="stat-label">Partner Shelters</span>
         </div>
 
@@ -1255,7 +1349,7 @@ include 'common/header.php';
             <div class="stat-icon">
                 <i class="fas fa-users"></i>
             </div>
-            <span class="stat-number" data-count="<?php echo $stats['happy_families']; ?>">0</span>
+            <span class="stat-number" data-count="<?php echo intval($stats['happy_families']); ?>">0</span>
             <span class="stat-label">Happy Families</span>
         </div>
     </div>
@@ -1275,21 +1369,40 @@ include 'common/header.php';
 
         <div class="pets-grid">
             <?php if (empty($featured_pets)): ?>
-            <div style="grid-column: 1 / -1; text-align: center; padding: 80px 20px;">
-                <i class="fas fa-paw" style="font-size: 5rem; color: #e5e7eb; margin-bottom: 20px;"></i>
-                <h3 style="color: #6b7280; font-size: 1.5rem; margin-bottom: 10px;">No pets available at the moment</h3>
-                <p style="color: #9ca3af;">Check back soon for new arrivals!</p>
+            <div class="empty-state">
+                <i class="fas fa-paw"></i>
+                <h3>No pets available at the moment</h3>
+                <p>Check back soon for new arrivals!</p>
             </div>
             <?php else: ?>
             <?php foreach ($featured_pets as $pet): ?>
-            <div class="pet-card">
+            <div class="pet-card"
+                <?php echo $isLoggedIn ? 'onclick="window.location.href=\'adopter/petDetails.php?id=' . intval($pet['pet_id']) . '\'"' : ''; ?>>
                 <div class="pet-image">
-                    <img src="<?php echo getImageUrl($pet['primary_image'], 'pets'); ?>"
-                        alt="<?php echo Security::sanitize($pet['pet_name']); ?>" loading="lazy">
+                    <?php 
+                            $imageUrl = getPetImageUrl($pet['pet_image']);
+                            ?>
+                    <img src="<?php echo htmlspecialchars($imageUrl); ?>"
+                        alt="<?php echo htmlspecialchars($pet['pet_name']); ?>" loading="lazy"
+                        onerror="this.src='assets/images/pet-placeholder.jpg';"
+                        <?php echo !$isLoggedIn ? 'class="blur-content"' : ''; ?>>
+
+                    <?php if (!$isLoggedIn): ?>
+                    <div class="login-overlay">
+                        <div class="login-overlay-content">
+                            <i class="fas fa-lock login-overlay-icon"></i>
+                            <p class="login-overlay-text">Login to see pet details</p>
+                            <a href="auth/login.php" class="login-overlay-link" onclick="event.stopPropagation();">
+                                Login Now
+                            </a>
+                        </div>
+                    </div>
+                    <?php endif; ?>
 
                     <div class="pet-badges">
-                        <span class="pet-category"><?php echo Security::sanitize($pet['category_name']); ?></span>
-                        <?php if ($pet['days_waiting'] < 7): ?>
+                        <span
+                            class="pet-category"><?php echo htmlspecialchars($pet['category_name'] ?? 'Pet'); ?></span>
+                        <?php if (isset($pet['days_waiting']) && $pet['days_waiting'] < 7): ?>
                         <span class="pet-status new">
                             <i class="fas fa-sparkles"></i> New
                         </span>
@@ -1297,20 +1410,20 @@ include 'common/header.php';
                     </div>
                 </div>
 
-                <div class="pet-info">
+                <div class="pet-info <?php echo !$isLoggedIn ? 'blur-content' : ''; ?>">
                     <div class="pet-header">
-                        <h3 class="pet-name"><?php echo Security::sanitize($pet['pet_name']); ?></h3>
-                        <span class="pet-age"><?php echo $pet['age']; ?> years</span>
+                        <h3 class="pet-name"><?php echo htmlspecialchars($pet['pet_name']); ?></h3>
+                        <span class="pet-age"><?php echo intval($pet['age'] ?? 0); ?> years</span>
                     </div>
 
                     <div class="pet-details">
                         <span class="pet-detail">
                             <i class="fas fa-venus-mars"></i>
-                            <?php echo ucfirst($pet['gender']); ?>
+                            <?php echo ucfirst($pet['gender'] ?? 'Unknown'); ?>
                         </span>
                         <span class="pet-detail">
                             <i class="fas fa-dog"></i>
-                            <?php echo Security::sanitize($pet['breed_name'] ?: 'Mixed'); ?>
+                            <?php echo htmlspecialchars($pet['breed_name'] ?: 'Mixed'); ?>
                         </span>
                         <span class="pet-detail">
                             <i class="fas fa-weight"></i>
@@ -1320,21 +1433,28 @@ include 'common/header.php';
 
                     <p class="pet-description">
                         <?php 
-                            $description = !empty($pet['description']) ? $pet['description'] : 'A wonderful pet looking for a loving home!';
-                            echo Security::sanitize(substr($description, 0, 150)) . (strlen($description) > 150 ? '...' : '');
-                            ?>
+                                $description = !empty($pet['description']) ? $pet['description'] : 'A wonderful pet looking for a loving home!';
+                                echo htmlspecialchars(substr($description, 0, 150)) . (strlen($description) > 150 ? '...' : '');
+                                ?>
                     </p>
 
                     <div class="pet-footer">
                         <div class="pet-shelter">
                             <i class="fas fa-building"></i>
-                            <?php echo Security::sanitize($pet['shelter_name']); ?>
+                            <?php echo htmlspecialchars($pet['shelter_name'] ?? 'Pet Shelter'); ?>
                         </div>
-                        <a href="<?php echo BASE_URL; ?>adopter/petDetails.php?id=<?php echo $pet['pet_id']; ?>"
-                            class="pet-action">
-                            Meet <?php echo Security::sanitize($pet['pet_name']); ?>
+                        <?php if ($isLoggedIn): ?>
+                        <a href="adopter/petDetails.php?id=<?php echo intval($pet['pet_id']); ?>" class="pet-action"
+                            onclick="event.stopPropagation();">
+                            Meet <?php echo htmlspecialchars($pet['pet_name']); ?>
                             <i class="fas fa-arrow-right"></i>
                         </a>
+                        <?php else: ?>
+                        <a href="auth/login.php" class="pet-action" onclick="event.stopPropagation();">
+                            Login to Adopt
+                            <i class="fas fa-lock"></i>
+                        </a>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -1344,10 +1464,17 @@ include 'common/header.php';
 
         <?php if (!empty($featured_pets)): ?>
         <div style="text-align: center; margin-top: 60px;">
-            <a href="<?php echo BASE_URL; ?>adopter/browsePets.php" class="hero-btn hero-btn-primary">
+            <?php if ($isLoggedIn): ?>
+            <a href="adopter/browsePets.php" class="hero-btn hero-btn-primary">
                 <i class="fas fa-search"></i>
                 View All Available Pets
             </a>
+            <?php else: ?>
+            <a href="auth/login.php" class="hero-btn hero-btn-primary">
+                <i class="fas fa-lock"></i>
+                Login to View All Pets
+            </a>
+            <?php endif; ?>
         </div>
         <?php endif; ?>
     </div>
@@ -1381,30 +1508,31 @@ include 'common/header.php';
             <div class="story-card">
                 <div class="story-content">
                     <p class="story-text">
-                        "<?php echo Security::sanitize($story['pet_name']) . ' ' . $testimonials[$index % count($testimonials)]; ?>"
+                        "<?php echo htmlspecialchars($story['pet_name']) . ' ' . $testimonials[$index % count($testimonials)]; ?>"
                     </p>
 
                     <div class="story-author">
                         <?php 
-                        $storyImageUrl = getImageUrl($story['primary_image'], 'pets');
-                        $hasImage = $storyImageUrl !== BASE_URL . 'assets/images/pet-placeholder.jpg';
-                        ?>
+                            $storyImageUrl = getPetImageUrl($story['pet_image'] ?? '');
+                            $hasValidImage = !empty($story['pet_image']);
+                            ?>
 
-                        <?php if ($hasImage): ?>
                         <div class="story-avatar">
-                            <img src="<?php echo $storyImageUrl; ?>"
-                                alt="<?php echo Security::sanitize($story['pet_name']); ?>" loading="lazy">
-                        </div>
-                        <?php else: ?>
-                        <div class="story-avatar placeholder">
+                            <?php if ($hasValidImage): ?>
+                            <img src="<?php echo htmlspecialchars($storyImageUrl); ?>"
+                                alt="<?php echo htmlspecialchars($story['pet_name']); ?>" loading="lazy"
+                                onerror="this.style.display='none'; this.nextElementSibling.style.display='block';">
+                            <i class="fas fa-paw" style="display:none;"></i>
+                            <?php else: ?>
                             <i class="fas fa-paw"></i>
+                            <?php endif; ?>
                         </div>
-                        <?php endif; ?>
 
                         <div class="story-info">
-                            <h4><?php echo Security::sanitize($story['first_name'] . ' ' . $story['last_name']); ?></h4>
-                            <p>Adopted <?php echo Security::sanitize($story['pet_name']); ?> •
-                                <?php echo date('F Y', strtotime($story['adoption_date'])); ?></p>
+                            <h4><?php echo htmlspecialchars(($story['first_name'] ?? '') . ' ' . ($story['last_name'] ?? '')); ?>
+                            </h4>
+                            <p>Adopted <?php echo htmlspecialchars($story['pet_name']); ?> •
+                                <?php echo date('F Y', strtotime($story['adoption_date'] ?? 'now')); ?></p>
                         </div>
                     </div>
                 </div>
@@ -1434,6 +1562,7 @@ include 'common/header.php';
                 'Cat' => 'fa-cat',
                 'Bird' => 'fa-dove',
                 'Rabbit' => 'fa-rabbit',
+                'Fish' => 'fa-fish',
                 'Other' => 'fa-paw'
             ];
             ?>
@@ -1441,22 +1570,31 @@ include 'common/header.php';
             <?php foreach ($latest_guides as $guide): ?>
             <div class="guide-card">
                 <div class="guide-image">
-                    <i class="fas <?php echo $guide_icons[$guide['category_name']] ?? 'fa-paw'; ?> guide-icon"></i>
-                    <span class="guide-category"><?php echo Security::sanitize($guide['category_name']); ?> Care</span>
+                    <i
+                        class="fas <?php echo $guide_icons[$guide['category_name'] ?? 'Other'] ?? 'fa-paw'; ?> guide-icon"></i>
+                    <span class="guide-category"><?php echo htmlspecialchars($guide['category_name'] ?? 'Pet'); ?>
+                        Care</span>
                 </div>
 
                 <div class="guide-content">
-                    <h3 class="guide-title"><?php echo Security::sanitize($guide['title']); ?></h3>
+                    <h3 class="guide-title"><?php echo htmlspecialchars($guide['title'] ?? 'Care Guide'); ?></h3>
                     <p class="guide-excerpt">
-                        <?php echo Security::sanitize(substr(strip_tags($guide['content']), 0, 150)) . '...'; ?>
+                        <?php 
+                            $content = $guide['content'] ?? 'Learn how to take care of your pet with expert advice and tips.';
+                            echo htmlspecialchars(substr(strip_tags($content), 0, 150)) . '...'; 
+                            ?>
                     </p>
 
                     <div class="guide-footer">
                         <span class="guide-author">
                             <i class="fas fa-user-circle"></i>
-                            <?php echo Security::sanitize($guide['first_name'] . ' ' . substr($guide['last_name'], 0, 1) . '.'); ?>
+                            <?php 
+                                $firstName = $guide['first_name'] ?? 'Expert';
+                                $lastName = $guide['last_name'] ?? 'Author';
+                                echo htmlspecialchars($firstName . ' ' . substr($lastName, 0, 1) . '.'); 
+                                ?>
                         </span>
-                        <a href="<?php echo BASE_URL; ?>adopter/careGuides.php?id=<?php echo $guide['guide_id']; ?>"
+                        <a href="adopter/careGuides.php?id=<?php echo intval($guide['guide_id'] ?? 0); ?>"
                             class="guide-link">
                             Read More <i class="fas fa-arrow-right"></i>
                         </a>
@@ -1467,7 +1605,7 @@ include 'common/header.php';
         </div>
 
         <div style="text-align: center; margin-top: 60px;">
-            <a href="<?php echo BASE_URL; ?>adopter/careGuides.php" class="hero-btn hero-btn-primary">
+            <a href="adopter/careGuides.php" class="hero-btn hero-btn-primary">
                 <i class="fas fa-book"></i>
                 Explore All Guides
             </a>
@@ -1540,21 +1678,21 @@ include 'common/header.php';
         </p>
 
         <div class="hero-buttons">
-            <?php if (!Session::isLoggedIn()): ?>
-            <a href="<?php echo BASE_URL; ?>auth/register.php?type=adopter" class="hero-btn hero-btn-primary">
+            <?php if (!$isLoggedIn): ?>
+            <a href="auth/register.php?type=adopter" class="hero-btn hero-btn-primary">
                 <i class="fas fa-user-plus"></i>
                 Create Account
             </a>
-            <a href="<?php echo BASE_URL; ?>auth/register.php?type=shelter" class="hero-btn hero-btn-secondary">
+            <a href="auth/register.php?type=shelter" class="hero-btn hero-btn-secondary">
                 <i class="fas fa-building"></i>
                 Register as Shelter
             </a>
             <?php else: ?>
-            <a href="<?php echo BASE_URL; ?>adopter/browsePets.php" class="hero-btn hero-btn-primary">
+            <a href="adopter/browsePets.php" class="hero-btn hero-btn-primary">
                 <i class="fas fa-paw"></i>
                 Find Your Pet
             </a>
-            <a href="<?php echo BASE_URL; ?>adopter/dashboard.php" class="hero-btn hero-btn-secondary">
+            <a href="adopter/dashboard.php" class="hero-btn hero-btn-secondary">
                 <i class="fas fa-tachometer-alt"></i>
                 My Dashboard
             </a>
@@ -1567,86 +1705,12 @@ include 'common/header.php';
 // Homepage JavaScript Enhancement
 document.addEventListener('DOMContentLoaded', function() {
     // Initialize all animations and interactions
-    initHeroSection();
     initCounters();
     initScrollAnimations();
     initPetCards();
     initLazyLoading();
-    handleStoryAvatars();
+    initLoginOverlays();
 });
-
-// Initialize Hero Section with local videos
-function initHeroSection() {
-    const video1 = document.getElementById('video1');
-    const video2 = document.getElementById('video2');
-
-    // Ensure videos are playing
-    if (video1 && video2) {
-        // Try to play videos
-        const playVideo = (video) => {
-            const playPromise = video.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(error => {
-                    console.log('Video autoplay failed:', error);
-                    // Try muted autoplay as fallback
-                    video.muted = true;
-                    video.play().catch(e => {
-                        console.log('Muted autoplay also failed:', e);
-                    });
-                });
-            }
-        };
-
-        playVideo(video1);
-        playVideo(video2);
-
-        // Sync videos
-        video1.addEventListener('loadedmetadata', () => {
-            video2.currentTime = video1.currentTime;
-        });
-    }
-}
-
-// Video Control Functions
-let isMuted = true;
-let isPlaying = true;
-
-function toggleMute() {
-    const video1 = document.getElementById('video1');
-    const video2 = document.getElementById('video2');
-    const muteIcon = document.getElementById('muteIcon');
-
-    isMuted = !isMuted;
-
-    if (video1 && video2) {
-        video1.muted = isMuted;
-        video2.muted = isMuted;
-    }
-
-    // Update icon
-    muteIcon.className = isMuted ? 'fas fa-volume-mute' : 'fas fa-volume-up';
-}
-
-function togglePlay() {
-    const video1 = document.getElementById('video1');
-    const video2 = document.getElementById('video2');
-    const playIcon = document.getElementById('playIcon');
-
-    isPlaying = !isPlaying;
-
-    if (video1 && video2) {
-        if (isPlaying) {
-            video1.play();
-            video2.play();
-        } else {
-            video1.pause();
-            video2.pause();
-        }
-    }
-
-    // Update icon
-    playIcon.className = isPlaying ? 'fas fa-pause' : 'fas fa-play';
-}
 
 // Animated Counters
 function initCounters() {
@@ -1715,42 +1779,46 @@ function initScrollAnimations() {
 // Pet Card Interactions
 function initPetCards() {
     const petCards = document.querySelectorAll('.pet-card');
+    const isLoggedIn = <?php echo json_encode($isLoggedIn); ?>;
 
     petCards.forEach(card => {
-        const img = card.querySelector('.pet-image img');
-        if (!img) return;
-
-        card.addEventListener('mouseenter', function() {
-            img.style.transform = 'scale(1.1)';
-        });
-
-        card.addEventListener('mouseleave', function() {
-            img.style.transform = 'scale(1)';
-        });
-
-        // Add click handler to entire card
-        card.addEventListener('click', function(e) {
-            if (!e.target.closest('.pet-action')) {
-                const link = this.querySelector('.pet-action');
-                if (link) {
-                    window.location.href = link.href;
+        // Only add hover effects if user is logged in
+        if (isLoggedIn) {
+            card.addEventListener('mouseenter', function() {
+                const img = this.querySelector('.pet-image img');
+                if (img && !img.classList.contains('error')) {
+                    img.style.transform = 'scale(1.05)';
                 }
-            }
-        });
+            });
+
+            card.addEventListener('mouseleave', function() {
+                const img = this.querySelector('.pet-image img');
+                if (img && !img.classList.contains('error')) {
+                    img.style.transform = 'scale(1)';
+                }
+            });
+        } else {
+            // Add cursor style for non-logged in users
+            card.style.cursor = 'default';
+        }
     });
 }
 
-// Handle story avatar images
-function handleStoryAvatars() {
-    const storyAvatars = document.querySelectorAll('.story-avatar img');
+// Login Overlay Interactions
+function initLoginOverlays() {
+    const isLoggedIn = <?php echo json_encode($isLoggedIn); ?>;
 
-    storyAvatars.forEach(img => {
-        img.addEventListener('error', function() {
-            const avatar = this.parentElement;
-            avatar.classList.add('placeholder');
-            avatar.innerHTML = '<i class="fas fa-paw"></i>';
+    if (!isLoggedIn) {
+        // Prevent clicks on pet cards for non-logged in users
+        document.querySelectorAll('.pet-card').forEach(card => {
+            card.addEventListener('click', function(e) {
+                if (!isLoggedIn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            });
         });
-    });
+    }
 }
 
 // Lazy Loading for Images
@@ -1782,7 +1850,7 @@ document.querySelectorAll('a[href^="#"]').forEach(anchor => {
         const target = document.querySelector(targetId);
 
         if (target) {
-            const headerHeight = document.querySelector('.header')?.offsetHeight || 70;
+            const headerHeight = 70;
             const targetPosition = target.offsetTop - headerHeight - 20;
 
             window.scrollTo({
@@ -1793,34 +1861,16 @@ document.querySelectorAll('a[href^="#"]').forEach(anchor => {
     });
 });
 
-// Add parallax effect to hero section
-let ticking = false;
-
-function updateParallax() {
-    const scrolled = window.pageYOffset;
-    const heroVideos = document.querySelector('.hero-videos');
-
-    if (heroVideos && scrolled < window.innerHeight) {
-        heroVideos.style.transform = `translateY(${scrolled * 0.5}px)`;
-    }
-
-    ticking = false;
-}
-
-function requestTick() {
-    if (!ticking) {
-        window.requestAnimationFrame(updateParallax);
-        ticking = true;
-    }
-}
-
-window.addEventListener('scroll', requestTick);
-
 // Handle button loading states
 document.querySelectorAll('.hero-btn, .pet-action').forEach(btn => {
     btn.addEventListener('click', function(e) {
         if (this.classList.contains('loading')) {
             e.preventDefault();
+            return;
+        }
+
+        // Don't add loading state for hash links
+        if (this.getAttribute('href').startsWith('#')) {
             return;
         }
 
@@ -1836,25 +1886,32 @@ document.querySelectorAll('.hero-btn, .pet-action').forEach(btn => {
     });
 });
 
-// Error handling for all images
-document.querySelectorAll('img').forEach(img => {
-    img.addEventListener('error', function() {
-        console.log('Image failed to load:', this.src);
-        this.src = '<?php echo BASE_URL; ?>assets/images/pet-placeholder.jpg';
-        this.onerror = null; // Prevent infinite loop
-    });
-});
+// Add parallax effect to hero section
+let ticking = false;
 
-// Initialize tooltips
-const tooltips = document.querySelectorAll('[title]');
-tooltips.forEach(element => {
-    const titleText = element.getAttribute('title');
-    element.removeAttribute('title');
-    element.setAttribute('data-tooltip', titleText);
-});
+function updateParallax() {
+    const scrolled = window.pageYOffset;
+    const heroSection = document.querySelector('.hero-section');
 
-// Debug info (remove in production)
+    if (heroSection && scrolled < window.innerHeight) {
+        heroSection.style.transform = `translateY(${scrolled * 0.5}px)`;
+    }
+
+    ticking = false;
+}
+
+function requestTick() {
+    if (!ticking) {
+        window.requestAnimationFrame(updateParallax);
+        ticking = true;
+    }
+}
+
+window.addEventListener('scroll', requestTick);
+
+// Console log for debugging
 console.log('Homepage loaded successfully');
+console.log('User logged in:', <?php echo json_encode($isLoggedIn); ?>);
 console.log('Featured pets:', <?php echo count($featured_pets); ?>);
 console.log('Success stories:', <?php echo count($success_stories); ?>);
 console.log('Care guides:', <?php echo count($latest_guides); ?>);

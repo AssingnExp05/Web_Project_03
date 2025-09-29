@@ -196,3 +196,19 @@ CREATE INDEX idx_pets_shelter ON pets(shelter_id);
 CREATE INDEX idx_applications_status ON adoption_applications(application_status);
 CREATE INDEX idx_users_type ON users(user_type);
 CREATE INDEX idx_users_email ON users(email);
+
+
+-- Admin user (password = Admin#2025!)
+INSERT INTO users (
+  username, email, password_hash, user_type, first_name, last_name, phone, address, is_active
+) VALUES (
+  'admin_master',
+  'admin@gmail.com',
+  '$2b$12$ifTuQbHNOifbnBiiClYYj./AEnkrPgM9Ej/TxMQktwxgEuoMT/Kd6',  -- bcrypt hash of "Admin#2025!"
+  'admin',
+  'Admin',
+  'Administrator',
+  '+94234567890',
+  '123 Main St, Colombo',
+  TRUE
+);

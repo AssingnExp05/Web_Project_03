@@ -116,6 +116,8 @@ if (isset($_SESSION['success_message'])) {
     $success_message = $_SESSION['success_message'];
     unset($_SESSION['success_message']);
 }
+
+include 'common/header.php';
 ?>
 
 <!DOCTYPE html>
@@ -127,6 +129,7 @@ if (isset($_SESSION['success_message'])) {
     <title><?php echo htmlspecialchars($page_title); ?></title>
     <meta name="description" content="<?php echo htmlspecialchars($page_description); ?>">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
     <style>
     * {
         margin: 0;
@@ -141,55 +144,7 @@ if (isset($_SESSION['success_message'])) {
         background: #f8f9fa;
     }
 
-    /* Navigation */
-    .navbar {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem 0;
-        box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
-        position: sticky;
-        top: 0;
-        z-index: 1000;
-    }
 
-    .nav-container {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 0 20px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .logo {
-        color: white;
-        font-size: 1.8rem;
-        font-weight: 700;
-        text-decoration: none;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-
-    .nav-links {
-        display: flex;
-        gap: 30px;
-        align-items: center;
-    }
-
-    .nav-link {
-        color: white;
-        text-decoration: none;
-        font-weight: 500;
-        padding: 8px 16px;
-        border-radius: 20px;
-        transition: all 0.3s ease;
-    }
-
-    .nav-link:hover,
-    .nav-link.active {
-        background: rgba(255, 255, 255, 0.2);
-        transform: translateY(-2px);
-    }
 
     /* Hero Section - Enhanced */
     .hero-contact {
@@ -902,21 +857,7 @@ if (isset($_SESSION['success_message'])) {
 </head>
 
 <body>
-    <!-- Navigation -->
-    <nav class="navbar">
-        <div class="nav-container">
-            <a href="<?php echo $BASE_URL; ?>index.php" class="logo">
-                <i class="fas fa-heart"></i>
-                Pet Adoption Care Guide
-            </a>
-            <div class="nav-links">
-                <a href="<?php echo $BASE_URL; ?>index.php" class="nav-link">Home</a>
-                <a href="<?php echo $BASE_URL; ?>about.php" class="nav-link">About</a>
-                <a href="<?php echo $BASE_URL; ?>contact.php" class="nav-link active">Contact</a>
-                <a href="<?php echo $BASE_URL; ?>auth/login.php" class="nav-link">Login</a>
-            </div>
-        </div>
-    </nav>
+
 
     <!-- Hero Section -->
     <section class="hero-contact">
