@@ -1,26 +1,157 @@
 <?php
-// admin/manageVaccinations.php - Admin Vaccination Management Page
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
-
-// Start session
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
-}
-
-// Base URL
-$BASE_URL = 'http://' . $_SERVER['HTTP_HOST'] . '/pet_care/';
+session_start();
 
 // Check if user is logged in and is an admin
 if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] !== 'admin') {
-    $_SESSION['error_message'] = 'Please login as an admin to access this page.';
-    header('Location: ' . $BASE_URL . 'auth/login.php');
+    header("Location: ../auth/login.php");
     exit();
 }
 
-// Get user information
-$user_id = $_SESSION['user_id'];
-$page_title = 'Manage Vaccinations - Admin Dashboard';
+// Database connection
+$servername = "localhost";
+$username = "root";
+$password = "";
+$dbname = "pet_adoption_care_guide";
+
+// Create connection
+$conn = new mysqli($servername, $username, $password, $dbname);
+
+// Check connection
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
+
+// Set charset
+$conn->set_charset("utf8mb4");
+
+// Handle AJAX requests
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_SERVER['HTTP_X_REQUESTED_WITH']) && 
+    strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {
+    
+    header('Content-Type: application/json');
+    $response = ['success' => false, 'message' => ''];
+    
+    if (isset($_POST['action'])) {
+        switch ($_POST['action']) {
+            case 'add_vaccination':
+                $pet_id = intval($_POST['pet_id'] ?? 0);
+                $vaccine_name = trim($_POST['vaccine_name'] ?? '');
+                $vaccination_date = $_POST['vaccination_date'] ?? null;
+                $next_due_date = $_POST['next_due_date'] ?? null;
+                $veterinarian_name = trim($_POST['veterinarian_name'] ?? '');
+                $notes = trim($_POST['notes'] ?? '');
+                
+                if ($pet_id > 0 && !empty($vaccine_name)) {
+                    $stmt = $conn->prepare("
+                        INSERT INTO vaccinations (pet_id, vaccine_name, vaccination_date, next_due_date, 
+                                                veterinarian_name, notes)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ");
+                    
+                    $stmt->bind_param("isssss", $pet_id, $vaccine_name, $vaccination_date, 
+                                     $next_due_date, $veterinarian_name, $notes);
+                    
+                    if ($stmt->execute()) {
+                        $response['success'] = true;
+                        $response['message'] = 'Vaccination record added successfully';
+                    } else {
+                        $response['message'] = 'Failed to add vaccination record: ' . $conn->error;
+                    }
+                    $stmt->close();
+                } else {
+                    $response['message'] = 'Please fill in all required fields';
+                }
+                break;
+                
+            case 'update_vaccination':
+                $vaccination_id = intval($_POST['vaccination_id'] ?? 0);
+                $vaccine_name = trim($_POST['vaccine_name'] ?? '');
+                $vaccination_date = $_POST['vaccination_date'] ?? null;
+                $next_due_date = $_POST['next_due_date'] ?? null;
+                $veterinarian_name = trim($_POST['veterinarian_name'] ?? '');
+                $notes = trim($_POST['notes'] ?? '');
+                
+                if ($vaccination_id > 0 && !empty($vaccine_name)) {
+                    $stmt = $conn->prepare("
+                        UPDATE vaccinations 
+                        SET vaccine_name = ?, vaccination_date = ?, next_due_date = ?,
+                            veterinarian_name = ?, notes = ?
+                        WHERE vaccination_id = ?
+                    ");
+                    
+                    $stmt->bind_param("sssssi", $vaccine_name, $vaccination_date, $next_due_date, 
+                                     $veterinarian_name, $notes, $vaccination_id);
+                    
+                    if ($stmt->execute()) {
+                        $response['success'] = true;
+                        $response['message'] = 'Vaccination record updated successfully';
+                    } else {
+                        $response['message'] = 'Failed to update vaccination record: ' . $conn->error;
+                    }
+                    $stmt->close();
+                } else {
+                    $response['message'] = 'Please fill in all required fields';
+                }
+                break;
+                
+            case 'delete_vaccination':
+                $vaccination_id = intval($_POST['vaccination_id'] ?? 0);
+                
+                if ($vaccination_id > 0) {
+                    $stmt = $conn->prepare("DELETE FROM vaccinations WHERE vaccination_id = ?");
+                    $stmt->bind_param("i", $vaccination_id);
+                    
+                    if ($stmt->execute()) {
+                        $response['success'] = true;
+                        $response['message'] = 'Vaccination record deleted successfully';
+                    } else {
+                        $response['message'] = 'Failed to delete vaccination record: ' . $conn->error;
+                    }
+                    $stmt->close();
+                } else {
+                    $response['message'] = 'Invalid vaccination ID';
+                }
+                break;
+                
+            case 'get_vaccination_details':
+                $vaccination_id = intval($_POST['vaccination_id'] ?? 0);
+                
+                if ($vaccination_id > 0) {
+                    $stmt = $conn->prepare("
+                        SELECT v.*, p.pet_name, p.pet_id, pc.category_name, pb.breed_name, s.shelter_name
+                        FROM vaccinations v
+                        LEFT JOIN pets p ON v.pet_id = p.pet_id
+                        LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
+                        LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
+                        LEFT JOIN shelters s ON p.shelter_id = s.shelter_id
+                        WHERE v.vaccination_id = ?
+                    ");
+                    $stmt->bind_param("i", $vaccination_id);
+                    $stmt->execute();
+                    $result = $stmt->get_result();
+                    
+                    if ($vaccination = $result->fetch_assoc()) {
+                        $response['success'] = true;
+                        $response['vaccination'] = $vaccination;
+                    } else {
+                        $response['message'] = 'Vaccination not found';
+                    }
+                    $stmt->close();
+                } else {
+                    $response['message'] = 'Invalid vaccination ID';
+                }
+                break;
+                
+            default:
+                $response['message'] = 'Invalid action';
+        }
+    } else {
+        $response['message'] = 'No action specified';
+    }
+    
+    echo json_encode($response);
+    exit();
+}
 
 // Initialize variables
 $vaccinations = [];
@@ -41,7 +172,6 @@ $stats = [
 $filter_status = $_GET['status'] ?? '';
 $filter_shelter = $_GET['shelter'] ?? '';
 $filter_pet = $_GET['pet'] ?? '';
-$filter_vaccine_type = $_GET['vaccine_type'] ?? '';
 $filter_date_from = $_GET['date_from'] ?? '';
 $filter_date_to = $_GET['date_to'] ?? '';
 $search_query = $_GET['search'] ?? '';
@@ -49,328 +179,181 @@ $page = max(1, intval($_GET['page'] ?? 1));
 $per_page = 15;
 $offset = ($page - 1) * $per_page;
 
-// Handle AJAX requests
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_SERVER['HTTP_X_REQUESTED_WITH'])) {
-    header('Content-Type: application/json');
-    
-    try {
-        require_once __DIR__ . '/../config/db.php';
-        $db = getDB();
-        
-        if ($db && isset($_POST['action'])) {
-            switch ($_POST['action']) {
-                case 'add_vaccination':
-                    $pet_id = intval($_POST['pet_id'] ?? 0);
-                    $vaccine_name = trim($_POST['vaccine_name'] ?? '');
-                    $vaccination_date = $_POST['vaccination_date'] ?? '';
-                    $next_due_date = $_POST['next_due_date'] ?? '';
-                    $veterinarian_name = trim($_POST['veterinarian_name'] ?? '');
-                    $notes = trim($_POST['notes'] ?? '');
-                    
-                    if ($pet_id > 0 && !empty($vaccine_name)) {
-                        $stmt = $db->prepare("
-                            INSERT INTO vaccinations (pet_id, vaccine_name, vaccination_date, next_due_date, 
-                                                    veterinarian_name, notes)
-                            VALUES (?, ?, ?, ?, ?, ?)
-                        ");
-                        
-                        $vacc_date = !empty($vaccination_date) ? $vaccination_date : null;
-                        $next_due = !empty($next_due_date) ? $next_due_date : null;
-                        
-                        if ($stmt->execute([$pet_id, $vaccine_name, $vacc_date, $next_due, $veterinarian_name, $notes])) {
-                            echo json_encode(['success' => true, 'message' => 'Vaccination record added successfully']);
-                        } else {
-                            echo json_encode(['success' => false, 'message' => 'Failed to add vaccination record']);
-                        }
-                    } else {
-                        echo json_encode(['success' => false, 'message' => 'Please fill in all required fields']);
-                    }
-                    break;
-                    
-                case 'update_vaccination':
-                    $vaccination_id = intval($_POST['vaccination_id'] ?? 0);
-                    $vaccine_name = trim($_POST['vaccine_name'] ?? '');
-                    $vaccination_date = $_POST['vaccination_date'] ?? '';
-                    $next_due_date = $_POST['next_due_date'] ?? '';
-                    $veterinarian_name = trim($_POST['veterinarian_name'] ?? '');
-                    $notes = trim($_POST['notes'] ?? '');
-                    
-                    if ($vaccination_id > 0 && !empty($vaccine_name)) {
-                        $stmt = $db->prepare("
-                            UPDATE vaccinations 
-                            SET vaccine_name = ?, vaccination_date = ?, next_due_date = ?,
-                                veterinarian_name = ?, notes = ?
-                            WHERE vaccination_id = ?
-                        ");
-                        
-                        $vacc_date = !empty($vaccination_date) ? $vaccination_date : null;
-                        $next_due = !empty($next_due_date) ? $next_due_date : null;
-                        
-                        if ($stmt->execute([$vaccine_name, $vacc_date, $next_due, $veterinarian_name, $notes, $vaccination_id])) {
-                            echo json_encode(['success' => true, 'message' => 'Vaccination record updated successfully']);
-                        } else {
-                            echo json_encode(['success' => false, 'message' => 'Failed to update vaccination record']);
-                        }
-                    } else {
-                        echo json_encode(['success' => false, 'message' => 'Please fill in all required fields']);
-                    }
-                    break;
-                    
-                case 'delete_vaccination':
-                    $vaccination_id = intval($_POST['vaccination_id'] ?? 0);
-                    
-                    if ($vaccination_id > 0) {
-                        $stmt = $db->prepare("DELETE FROM vaccinations WHERE vaccination_id = ?");
-                        if ($stmt->execute([$vaccination_id])) {
-                            echo json_encode(['success' => true, 'message' => 'Vaccination record deleted successfully']);
-                        } else {
-                            echo json_encode(['success' => false, 'message' => 'Failed to delete vaccination record']);
-                        }
-                    } else {
-                        echo json_encode(['success' => false, 'message' => 'Invalid vaccination ID']);
-                    }
-                    break;
-                    
-                case 'get_vaccination_details':
-                    $vaccination_id = intval($_POST['vaccination_id'] ?? 0);
-                    
-                    if ($vaccination_id > 0) {
-                        $stmt = $db->prepare("
-                            SELECT v.*, p.pet_name, pc.category_name, pb.breed_name, s.shelter_name
-                            FROM vaccinations v
-                            LEFT JOIN pets p ON v.pet_id = p.pet_id
-                            LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
-                            LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
-                            LEFT JOIN shelters s ON p.shelter_id = s.shelter_id
-                            WHERE v.vaccination_id = ?
-                        ");
-                        $stmt->execute([$vaccination_id]);
-                        $vaccination = $stmt->fetch(PDO::FETCH_ASSOC);
-                        
-                        if ($vaccination) {
-                            echo json_encode(['success' => true, 'vaccination' => $vaccination]);
-                        } else {
-                            echo json_encode(['success' => false, 'message' => 'Vaccination not found']);
-                        }
-                    } else {
-                        echo json_encode(['success' => false, 'message' => 'Invalid vaccination ID']);
-                    }
-                    break;
-                    
-                default:
-                    echo json_encode(['success' => false, 'message' => 'Invalid action']);
-            }
-        } else {
-            echo json_encode(['success' => false, 'message' => 'Database connection failed']);
-        }
-    } catch (Exception $e) {
-        echo json_encode(['success' => false, 'message' => 'Error: ' . $e->getMessage()]);
+// Get statistics
+$stats_queries = [
+    'total_vaccinations' => "SELECT COUNT(*) as count FROM vaccinations",
+    'completed_vaccinations' => "SELECT COUNT(*) as count FROM vaccinations WHERE vaccination_date IS NOT NULL",
+    'pending_vaccinations' => "SELECT COUNT(*) as count FROM vaccinations WHERE vaccination_date IS NULL AND next_due_date >= CURDATE()",
+    'overdue_vaccinations' => "SELECT COUNT(*) as count FROM vaccinations WHERE vaccination_date IS NULL AND next_due_date < CURDATE()",
+    'this_month_vaccinations' => "SELECT COUNT(*) as count FROM vaccinations WHERE MONTH(vaccination_date) = MONTH(CURDATE()) AND YEAR(vaccination_date) = YEAR(CURDATE())",
+    'upcoming_vaccinations' => "SELECT COUNT(*) as count FROM vaccinations WHERE next_due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY) AND vaccination_date IS NULL"
+];
+
+foreach ($stats_queries as $key => $query) {
+    $result = $conn->query($query);
+    if ($result && $row = $result->fetch_assoc()) {
+        $stats[$key] = intval($row['count']);
     }
-    exit();
 }
 
-// Database operations
-try {
-    require_once __DIR__ . '/../config/db.php';
-    $db = getDB();
-    
-    if ($db) {
-        // Get statistics
-        try {
-            // Total vaccinations
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM vaccinations");
-            $stmt->execute();
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            $stats['total_vaccinations'] = $result ? (int)$result['count'] : 0;
-            
-            // Completed vaccinations (have vaccination date)
-            $stmt = $db->prepare("SELECT COUNT(*) as count FROM vaccinations WHERE vaccination_date IS NOT NULL");
-            $stmt->execute();
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            $stats['completed_vaccinations'] = $result ? (int)$result['count'] : 0;
-            
-            // Pending vaccinations (no vaccination date but have next due date in future)
-            $stmt = $db->prepare("
-                SELECT COUNT(*) as count FROM vaccinations 
-                WHERE vaccination_date IS NULL AND next_due_date >= CURDATE()
-            ");
-            $stmt->execute();
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            $stats['pending_vaccinations'] = $result ? (int)$result['count'] : 0;
-            
-            // Overdue vaccinations (no vaccination date and next due date is past)
-            $stmt = $db->prepare("
-                SELECT COUNT(*) as count FROM vaccinations 
-                WHERE vaccination_date IS NULL AND next_due_date < CURDATE()
-            ");
-            $stmt->execute();
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            $stats['overdue_vaccinations'] = $result ? (int)$result['count'] : 0;
-            
-            // This month vaccinations
-            $stmt = $db->prepare("
-                SELECT COUNT(*) as count FROM vaccinations 
-                WHERE MONTH(vaccination_date) = MONTH(CURDATE()) 
-                AND YEAR(vaccination_date) = YEAR(CURDATE())
-            ");
-            $stmt->execute();
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            $stats['this_month_vaccinations'] = $result ? (int)$result['count'] : 0;
-            
-            // Upcoming vaccinations (next 30 days)
-            $stmt = $db->prepare("
-                SELECT COUNT(*) as count FROM vaccinations 
-                WHERE next_due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-                AND vaccination_date IS NULL
-            ");
-            $stmt->execute();
-            $result = $stmt->fetch(PDO::FETCH_ASSOC);
-            $stats['upcoming_vaccinations'] = $result ? (int)$result['count'] : 0;
-            
-        } catch (Exception $e) {
-            error_log("Stats error: " . $e->getMessage());
-        }
-        
-        // Get shelters for filter dropdown
-        try {
-            $stmt = $db->prepare("SELECT shelter_id, shelter_name FROM shelters ORDER BY shelter_name");
-            $stmt->execute();
-            $shelters = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        } catch (Exception $e) {
-            $shelters = [];
-        }
-        
-        // Build the vaccinations query
-        $where_conditions = [];
-        $params = [];
-        
-        if (!empty($filter_status)) {
-            if ($filter_status === 'completed') {
-                $where_conditions[] = "v.vaccination_date IS NOT NULL";
-            } elseif ($filter_status === 'pending') {
-                $where_conditions[] = "v.vaccination_date IS NULL AND v.next_due_date >= CURDATE()";
-            } elseif ($filter_status === 'overdue') {
-                $where_conditions[] = "v.vaccination_date IS NULL AND v.next_due_date < CURDATE()";
-            }
-        }
-        
-        if (!empty($filter_shelter)) {
-            $where_conditions[] = "s.shelter_id = ?";
-            $params[] = $filter_shelter;
-        }
-        
-        if (!empty($filter_pet)) {
-            $where_conditions[] = "v.pet_id = ?";
-            $params[] = $filter_pet;
-        }
-        
-        if (!empty($filter_date_from)) {
-            $where_conditions[] = "DATE(COALESCE(v.vaccination_date, v.next_due_date)) >= ?";
-            $params[] = $filter_date_from;
-        }
-        
-        if (!empty($filter_date_to)) {
-            $where_conditions[] = "DATE(COALESCE(v.vaccination_date, v.next_due_date)) <= ?";
-            $params[] = $filter_date_to;
-        }
-        
-        if (!empty($search_query)) {
-            $where_conditions[] = "(p.pet_name LIKE ? OR v.vaccine_name LIKE ? OR v.veterinarian_name LIKE ? OR s.shelter_name LIKE ?)";
-            $search_term = "%$search_query%";
-            $params[] = $search_term;
-            $params[] = $search_term;
-            $params[] = $search_term;
-            $params[] = $search_term;
-        }
-        
-        $where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
-        
-        // Get total count for pagination
-        $count_query = "
-            SELECT COUNT(*) as total 
-            FROM vaccinations v
-            LEFT JOIN pets p ON v.pet_id = p.pet_id
-            LEFT JOIN shelters s ON p.shelter_id = s.shelter_id
-            $where_clause
-        ";
-        $stmt = $db->prepare($count_query);
-        $stmt->execute($params);
-        $count_result = $stmt->fetch(PDO::FETCH_ASSOC);
-        $total_vaccinations = $count_result ? (int)$count_result['total'] : 0;
-        $total_pages = max(1, ceil($total_vaccinations / $per_page));
-        
-        // Get vaccinations with pagination
-        try {
-            $vaccinations_query = "
-                SELECT v.*, 
-                       p.pet_name, p.age, p.gender, p.primary_image,
-                       pc.category_name, pb.breed_name,
-                       s.shelter_name,
-                       CASE 
-                           WHEN v.vaccination_date IS NOT NULL THEN 'completed'
-                           WHEN v.vaccination_date IS NULL AND v.next_due_date >= CURDATE() THEN 'pending'
-                           WHEN v.vaccination_date IS NULL AND v.next_due_date < CURDATE() THEN 'overdue'
-                           ELSE 'unknown'
-                       END as vaccination_status
-                FROM vaccinations v
-                LEFT JOIN pets p ON v.pet_id = p.pet_id
-                LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
-                LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
-                LEFT JOIN shelters s ON p.shelter_id = s.shelter_id
-                $where_clause
-                ORDER BY 
-                    CASE 
-                        WHEN v.vaccination_date IS NULL AND v.next_due_date < CURDATE() THEN 1
-                        WHEN v.vaccination_date IS NULL AND v.next_due_date >= CURDATE() THEN 2
-                        ELSE 3
-                    END,
-                    COALESCE(v.next_due_date, v.vaccination_date) DESC
-                LIMIT $per_page OFFSET $offset
-            ";
-            
-            $stmt = $db->prepare($vaccinations_query);
-            $stmt->execute($params);
-            $vaccinations = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        } catch (Exception $e) {
-            error_log("Vaccinations query error: " . $e->getMessage());
-            $vaccinations = [];
-        }
-        
-        // Get all pets for add vaccination form
-        try {
-            $stmt = $db->prepare("
-                SELECT p.pet_id, p.pet_name, pc.category_name, pb.breed_name, s.shelter_name, s.shelter_id 
-                FROM pets p 
-                LEFT JOIN shelters s ON p.shelter_id = s.shelter_id 
-                LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
-                LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
-                WHERE p.status IN ('available', 'pending')
-                ORDER BY s.shelter_name, p.pet_name
-            ");
-            $stmt->execute();
-            $pets = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        } catch (Exception $e) {
-            $pets = [];
-        }
-    }
-} catch (Exception $e) {
-    error_log("Manage Vaccinations database error: " . $e->getMessage());
+// Get shelters for filter
+$result = $conn->query("SELECT shelter_id, shelter_name FROM shelters ORDER BY shelter_name");
+while ($row = $result->fetch_assoc()) {
+    $shelters[] = $row;
 }
 
-// Common vaccine names for quick selection
+// Build vaccinations query
+$where_conditions = [];
+$params = [];
+$types = "";
+
+if (!empty($filter_status)) {
+    switch ($filter_status) {
+        case 'completed':
+            $where_conditions[] = "v.vaccination_date IS NOT NULL";
+            break;
+        case 'pending':
+            $where_conditions[] = "v.vaccination_date IS NULL AND v.next_due_date >= CURDATE()";
+            break;
+        case 'overdue':
+            $where_conditions[] = "v.vaccination_date IS NULL AND v.next_due_date < CURDATE()";
+            break;
+    }
+}
+
+if (!empty($filter_shelter)) {
+    $where_conditions[] = "s.shelter_id = ?";
+    $params[] = $filter_shelter;
+    $types .= "i";
+}
+
+if (!empty($filter_pet)) {
+    $where_conditions[] = "v.pet_id = ?";
+    $params[] = $filter_pet;
+    $types .= "i";
+}
+
+if (!empty($filter_date_from)) {
+    $where_conditions[] = "DATE(COALESCE(v.vaccination_date, v.next_due_date)) >= ?";
+    $params[] = $filter_date_from;
+    $types .= "s";
+}
+
+if (!empty($filter_date_to)) {
+    $where_conditions[] = "DATE(COALESCE(v.vaccination_date, v.next_due_date)) <= ?";
+    $params[] = $filter_date_to;
+    $types .= "s";
+}
+
+if (!empty($search_query)) {
+    $where_conditions[] = "(p.pet_name LIKE ? OR v.vaccine_name LIKE ? OR v.veterinarian_name LIKE ? OR s.shelter_name LIKE ?)";
+    $search_term = "%$search_query%";
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $params[] = $search_term;
+    $types .= "ssss";
+}
+
+$where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
+
+// Get total count
+$count_query = "
+    SELECT COUNT(*) as total 
+    FROM vaccinations v
+    LEFT JOIN pets p ON v.pet_id = p.pet_id
+    LEFT JOIN shelters s ON p.shelter_id = s.shelter_id
+    $where_clause
+";
+
+if (!empty($params)) {
+    $stmt = $conn->prepare($count_query);
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $result = $stmt->get_result();
+} else {
+    $result = $conn->query($count_query);
+}
+
+if ($row = $result->fetch_assoc()) {
+    $total_vaccinations = intval($row['total']);
+    $total_pages = max(1, ceil($total_vaccinations / $per_page));
+}
+
+// Get vaccinations
+$vaccinations_query = "
+    SELECT v.*, 
+           p.pet_name, p.age, p.gender, p.primary_image,
+           pc.category_name, pb.breed_name,
+           s.shelter_name,
+           CASE 
+               WHEN v.vaccination_date IS NOT NULL THEN 'completed'
+               WHEN v.vaccination_date IS NULL AND v.next_due_date >= CURDATE() THEN 'pending'
+               WHEN v.vaccination_date IS NULL AND v.next_due_date < CURDATE() THEN 'overdue'
+               ELSE 'unknown'
+           END as vaccination_status
+    FROM vaccinations v
+    LEFT JOIN pets p ON v.pet_id = p.pet_id
+    LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
+    LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
+    LEFT JOIN shelters s ON p.shelter_id = s.shelter_id
+    $where_clause
+    ORDER BY 
+        CASE 
+            WHEN v.vaccination_date IS NULL AND v.next_due_date < CURDATE() THEN 1
+            WHEN v.vaccination_date IS NULL AND v.next_due_date >= CURDATE() THEN 2
+            ELSE 3
+        END,
+        COALESCE(v.next_due_date, v.vaccination_date) DESC
+    LIMIT $per_page OFFSET $offset
+";
+
+if (!empty($params)) {
+    $stmt = $conn->prepare($vaccinations_query);
+    $stmt->bind_param($types, ...$params);
+    $stmt->execute();
+    $result = $stmt->get_result();
+} else {
+    $result = $conn->query($vaccinations_query);
+}
+
+while ($row = $result->fetch_assoc()) {
+    $vaccinations[] = $row;
+}
+
+// Get all pets for dropdown
+$pets_query = "
+    SELECT p.pet_id, p.pet_name, pc.category_name, pb.breed_name, s.shelter_name, s.shelter_id 
+    FROM pets p 
+    LEFT JOIN shelters s ON p.shelter_id = s.shelter_id 
+    LEFT JOIN pet_categories pc ON p.category_id = pc.category_id
+    LEFT JOIN pet_breeds pb ON p.breed_id = pb.breed_id
+    ORDER BY s.shelter_name, p.pet_name
+";
+$result = $conn->query($pets_query);
+while ($row = $result->fetch_assoc()) {
+    $pets[] = $row;
+}
+
+// Common vaccine names
 $common_vaccines = [
-    'Rabies', 'DHPP (Distemper, Hepatitis, Parvovirus, Parainfluenza)', 
-    'Bordetella', 'Lyme Disease', 'FVRCP (Feline Viral Rhinotracheitis, Calicivirus, Panleukopenia)',
-    'FeLV (Feline Leukemia)', 'FIV (Feline Immunodeficiency Virus)'
+    'Rabies', 
+    'DHPP (Distemper, Hepatitis, Parvovirus, Parainfluenza)', 
+    'Bordetella', 
+    'Lyme Disease', 
+    'FVRCP (Feline Viral Rhinotracheitis, Calicivirus, Panleukopenia)',
+    'FeLV (Feline Leukemia)', 
+    'FIV (Feline Immunodeficiency Virus)'
 ];
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?php echo htmlspecialchars($page_title); ?></title>
+    <title>Manage Vaccinations - Admin Dashboard</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
     * {
@@ -381,10 +364,11 @@ $common_vaccines = [
 
     body {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+        background: #f0f2f5;
         color: #333;
         line-height: 1.6;
         min-height: 100vh;
+        padding-top: 70px;
     }
 
     .container {
@@ -395,11 +379,15 @@ $common_vaccines = [
 
     /* Header Section */
     .page-header {
-        background: linear-gradient(135deg, #17a2b8 0%, #6f42c1 100%);
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-        border-radius: 20px;
-        padding: 30px 40px;
+        border-radius: 15px;
+        padding: 30px;
         margin-bottom: 30px;
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+    }
+
+    .header-content {
         display: flex;
         justify-content: space-between;
         align-items: center;
@@ -410,13 +398,14 @@ $common_vaccines = [
     .page-header h1 {
         font-size: 2.2rem;
         font-weight: 700;
-        margin: 0;
+        display: flex;
+        align-items: center;
+        gap: 15px;
     }
 
     .page-header p {
-        font-size: 1.1rem;
+        margin-top: 5px;
         opacity: 0.9;
-        margin: 5px 0 0 0;
     }
 
     .header-actions {
@@ -441,14 +430,12 @@ $common_vaccines = [
 
     .btn-primary {
         background: #ffd700;
-        color: #17a2b8;
+        color: #764ba2;
     }
 
     .btn-primary:hover {
         background: #ffed4e;
         transform: translateY(-2px);
-        text-decoration: none;
-        color: #6f42c1;
     }
 
     .btn-secondary {
@@ -459,8 +446,6 @@ $common_vaccines = [
 
     .btn-secondary:hover {
         background: rgba(255, 255, 255, 0.3);
-        text-decoration: none;
-        color: white;
     }
 
     .btn-success {
@@ -516,7 +501,7 @@ $common_vaccines = [
         background: white;
         border-radius: 15px;
         padding: 25px;
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
         transition: all 0.3s ease;
         position: relative;
         overflow: hidden;
@@ -535,7 +520,7 @@ $common_vaccines = [
 
     .stat-card:hover {
         transform: translateY(-5px);
-        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15);
+        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.12);
     }
 
     .stat-card.total {
@@ -594,7 +579,7 @@ $common_vaccines = [
         align-items: center;
         justify-content: center;
         font-size: 1.5rem;
-        opacity: 0.9;
+        opacity: 0.15;
     }
 
     /* Filters Section */
@@ -603,7 +588,7 @@ $common_vaccines = [
         border-radius: 15px;
         padding: 25px;
         margin-bottom: 25px;
-        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
     }
 
     .filters-title {
@@ -647,7 +632,7 @@ $common_vaccines = [
     .filter-group select:focus,
     .filter-group input:focus {
         outline: none;
-        border-color: #17a2b8;
+        border-color: #667eea;
     }
 
     .search-group {
@@ -666,11 +651,11 @@ $common_vaccines = [
         color: #666;
     }
 
-    /* Vaccinations Table */
+    /* Table Section */
     .vaccinations-section {
         background: white;
         border-radius: 15px;
-        box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
         overflow: hidden;
         margin-bottom: 25px;
     }
@@ -718,10 +703,6 @@ $common_vaccines = [
         z-index: 10;
     }
 
-    .vaccinations-table tr {
-        transition: background-color 0.3s ease;
-    }
-
     .vaccinations-table tr:hover {
         background: #f8f9fa;
     }
@@ -749,19 +730,6 @@ $common_vaccines = [
     }
 
     .pet-meta {
-        font-size: 0.8rem;
-        color: #666;
-    }
-
-    /* Vaccine Info */
-    .vaccine-info h4 {
-        font-size: 0.95rem;
-        font-weight: 600;
-        color: #2c3e50;
-        margin-bottom: 2px;
-    }
-
-    .vaccine-meta {
         font-size: 0.8rem;
         color: #666;
     }
@@ -808,6 +776,7 @@ $common_vaccines = [
         width: 100%;
         height: 100%;
         background: rgba(0, 0, 0, 0.5);
+        backdrop-filter: blur(5px);
     }
 
     .modal-content {
@@ -820,10 +789,11 @@ $common_vaccines = [
         position: relative;
         max-height: 90vh;
         overflow: hidden;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
     }
 
     .modal-header {
-        background: linear-gradient(135deg, #17a2b8, #6f42c1);
+        background: linear-gradient(135deg, #667eea, #764ba2);
         color: white;
         padding: 20px 25px;
         display: flex;
@@ -843,6 +813,7 @@ $common_vaccines = [
         cursor: pointer;
         color: white;
         opacity: 0.8;
+        transition: opacity 0.3s;
     }
 
     .modal-close:hover {
@@ -897,7 +868,7 @@ $common_vaccines = [
     .form-group input:focus,
     .form-group textarea:focus {
         outline: none;
-        border-color: #17a2b8;
+        border-color: #667eea;
     }
 
     .form-group textarea {
@@ -921,7 +892,7 @@ $common_vaccines = [
         font-size: 4rem;
         margin-bottom: 20px;
         opacity: 0.3;
-        color: #17a2b8;
+        color: #667eea;
     }
 
     .empty-title {
@@ -969,13 +940,12 @@ $common_vaccines = [
 
     .pagination a:hover {
         background: #e9ecef;
-        text-decoration: none;
     }
 
     .pagination .current {
-        background: #17a2b8;
+        background: #667eea;
         color: white;
-        border-color: #17a2b8;
+        border-color: #667eea;
     }
 
     .pagination .disabled {
@@ -994,6 +964,9 @@ $common_vaccines = [
         box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
         max-width: 400px;
         animation: slideInRight 0.5s ease-out;
+        display: flex;
+        align-items: center;
+        gap: 10px;
     }
 
     .message.success {
@@ -1003,6 +976,11 @@ $common_vaccines = [
 
     .message.error {
         background: #dc3545;
+        color: white;
+    }
+
+    .message.info {
+        background: #17a2b8;
         color: white;
     }
 
@@ -1018,30 +996,13 @@ $common_vaccines = [
         }
     }
 
-    /* Animations */
-    @keyframes fadeIn {
-        from {
-            opacity: 0;
-            transform: translateY(20px);
-        }
-
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-
-    .fade-in {
-        animation: fadeIn 0.6s ease-out;
-    }
-
     /* Responsive Design */
     @media (max-width: 768px) {
         .container {
             padding: 15px;
         }
 
-        .page-header {
+        .header-content {
             flex-direction: column;
             text-align: center;
         }
@@ -1072,6 +1033,11 @@ $common_vaccines = [
             margin: 2% auto;
             width: 95%;
         }
+
+        .actions-group {
+            flex-direction: row;
+            flex-wrap: wrap;
+        }
     }
 
     @media (max-width: 480px) {
@@ -1084,37 +1050,44 @@ $common_vaccines = [
             align-items: flex-start;
             text-align: left;
         }
+
+        .pagination-section {
+            flex-direction: column;
+            gap: 15px;
+            text-align: center;
+        }
     }
     </style>
 </head>
 
 <body>
-    <!-- Include Admin Navbar -->
-    <?php include_once __DIR__ . '/../common/navbar_admin.php'; ?>
+    <?php include '../common/navbar_admin.php'; ?>
 
     <div class="container">
         <!-- Page Header -->
-        <div class="page-header fade-in">
-            <div>
-                <h1><i class="fas fa-syringe"></i> Manage Vaccinations</h1>
-                <p>Track and manage pet vaccination records and schedules</p>
-            </div>
-            <div class="header-actions">
-                <button onclick="showAddVaccinationModal()" class="btn btn-primary">
-                    <i class="fas fa-plus"></i> Add Vaccination
-                </button>
-                <button onclick="exportVaccinations()" class="btn btn-secondary">
-                    <i class="fas fa-download"></i> Export Data
-                </button>
-                <button onclick="refreshData()" class="btn btn-secondary">
-                    <i class="fas fa-sync"></i> Refresh
-                </button>
+        <div class="page-header">
+            <div class="header-content">
+                <div>
+                    <h1><i class="fas fa-syringe"></i> Manage Vaccinations</h1>
+                    <p>Track and manage pet vaccination records and schedules</p>
+                </div>
+                <div class="header-actions">
+                    <button onclick="showAddVaccinationModal()" class="btn btn-primary">
+                        <i class="fas fa-plus"></i> Add Vaccination
+                    </button>
+                    <button onclick="exportVaccinations()" class="btn btn-secondary">
+                        <i class="fas fa-download"></i> Export
+                    </button>
+                    <button onclick="refreshData()" class="btn btn-secondary">
+                        <i class="fas fa-sync"></i> Refresh
+                    </button>
+                </div>
             </div>
         </div>
 
         <!-- Statistics Cards -->
-        <div class="stats-grid fade-in">
-            <div class="stat-card total">
+        <div class="stats-grid">
+            <div class="stat-card total" onclick="clearFilters()">
                 <div class="stat-content">
                     <div class="stat-info">
                         <h3>Total Records</h3>
@@ -1188,7 +1161,7 @@ $common_vaccines = [
         </div>
 
         <!-- Filters Section -->
-        <div class="filters-section fade-in">
+        <div class="filters-section">
             <div class="filters-title">
                 <i class="fas fa-filter"></i>
                 Filter & Search Vaccinations
@@ -1197,7 +1170,7 @@ $common_vaccines = [
                 <div class="filters-grid">
                     <div class="filter-group">
                         <label>Status</label>
-                        <select name="status" onchange="document.getElementById('filtersForm').submit()">
+                        <select name="status" onchange="this.form.submit()">
                             <option value="">All Statuses</option>
                             <option value="completed" <?php echo $filter_status === 'completed' ? 'selected' : ''; ?>>
                                 Completed</option>
@@ -1210,7 +1183,7 @@ $common_vaccines = [
 
                     <div class="filter-group">
                         <label>Shelter</label>
-                        <select name="shelter" onchange="document.getElementById('filtersForm').submit()">
+                        <select name="shelter" onchange="this.form.submit()">
                             <option value="">All Shelters</option>
                             <?php foreach ($shelters as $shelter): ?>
                             <option value="<?php echo $shelter['shelter_id']; ?>"
@@ -1234,7 +1207,7 @@ $common_vaccines = [
                     <div class="filter-group search-group">
                         <label>Search</label>
                         <input type="text" name="search" value="<?php echo htmlspecialchars($search_query); ?>"
-                            placeholder="Search pet, vaccine, vet..." onkeypress="handleSearchKeypress(event)">
+                            placeholder="Search pet, vaccine, vet...">
                         <i class="fas fa-search"></i>
                     </div>
 
@@ -1245,7 +1218,7 @@ $common_vaccines = [
                     </div>
 
                     <div class="filter-group">
-                        <a href="<?php echo $BASE_URL; ?>admin/manageVaccinations.php" class="btn btn-secondary"
+                        <a href="manageVaccinations.php" class="btn btn-secondary"
                             style="width: 100%; margin-top: 5px; text-align: center;">
                             <i class="fas fa-times"></i> Clear Filters
                         </a>
@@ -1255,7 +1228,7 @@ $common_vaccines = [
         </div>
 
         <!-- Vaccinations Table -->
-        <div class="vaccinations-section fade-in">
+        <div class="vaccinations-section">
             <div class="section-header">
                 <h2 class="section-title">
                     Vaccination Records
@@ -1287,7 +1260,7 @@ $common_vaccines = [
                     <?php endif; ?>
                 </p>
                 <?php if (!empty($filter_status) || !empty($search_query) || !empty($filter_shelter)): ?>
-                <a href="<?php echo $BASE_URL; ?>admin/manageVaccinations.php" class="btn btn-primary">
+                <a href="manageVaccinations.php" class="btn btn-primary">
                     <i class="fas fa-eye"></i> View All Records
                 </a>
                 <?php else: ?>
@@ -1316,8 +1289,8 @@ $common_vaccines = [
                         <tr data-vaccination-id="<?php echo $vaccination['vaccination_id']; ?>">
                             <td>
                                 <div class="pet-info">
-                                    <?php if (!empty($vaccination['primary_image'])): ?>
-                                    <img src="<?php echo $BASE_URL; ?>uploads/<?php echo htmlspecialchars($vaccination['primary_image']); ?>"
+                                    <?php if (!empty($vaccination['primary_image']) && file_exists('../uploads/' . $vaccination['primary_image'])): ?>
+                                    <img src="../uploads/<?php echo htmlspecialchars($vaccination['primary_image']); ?>"
                                         alt="<?php echo htmlspecialchars($vaccination['pet_name']); ?>"
                                         class="pet-photo">
                                     <?php else: ?>
@@ -1330,12 +1303,16 @@ $common_vaccines = [
                                         <h4><?php echo htmlspecialchars($vaccination['pet_name'] ?? 'Unknown Pet'); ?>
                                         </h4>
                                         <div class="pet-meta">
-                                            <div><i class="fas fa-info-circle"></i>
+                                            <div>
+                                                <i class="fas fa-info-circle"></i>
                                                 <?php echo htmlspecialchars(($vaccination['category_name'] ?? 'Unknown') . ' • ' . ($vaccination['breed_name'] ?? 'Mixed')); ?>
                                             </div>
-                                            <div><i class="fas fa-birthday-cake"></i>
-                                                <?php echo htmlspecialchars($vaccination['age'] ?? 'Unknown'); ?> years
-                                                old</div>
+                                            <?php if (isset($vaccination['age'])): ?>
+                                            <div>
+                                                <i class="fas fa-birthday-cake"></i>
+                                                <?php echo htmlspecialchars($vaccination['age']); ?> years old
+                                            </div>
+                                            <?php endif; ?>
                                         </div>
                                     </div>
                                 </div>
@@ -1344,14 +1321,12 @@ $common_vaccines = [
                                 <div class="vaccine-info">
                                     <h4><?php echo htmlspecialchars($vaccination['vaccine_name'] ?? 'Unknown Vaccine'); ?>
                                     </h4>
-                                    <div class="vaccine-meta">
-                                        <?php if (!empty($vaccination['notes'])): ?>
-                                        <div style="margin-top: 5px; font-size: 0.75rem; color: #666;">
-                                            <i class="fas fa-sticky-note"></i>
-                                            <?php echo htmlspecialchars(substr($vaccination['notes'], 0, 50)) . (strlen($vaccination['notes']) > 50 ? '...' : ''); ?>
-                                        </div>
-                                        <?php endif; ?>
+                                    <?php if (!empty($vaccination['notes'])): ?>
+                                    <div style="margin-top: 5px; font-size: 0.75rem; color: #666;">
+                                        <i class="fas fa-sticky-note"></i>
+                                        <?php echo htmlspecialchars(substr($vaccination['notes'], 0, 50)) . (strlen($vaccination['notes']) > 50 ? '...' : ''); ?>
                                     </div>
+                                    <?php endif; ?>
                                 </div>
                             </td>
                             <td>
@@ -1359,17 +1334,20 @@ $common_vaccines = [
                                     <?php if (!empty($vaccination['vaccination_date'])): ?>
                                     <div style="margin-bottom: 5px;">
                                         <strong style="color: #28a745;">Administered:</strong><br>
-                                        <span
-                                            style="color: #2c3e50;"><?php echo date('M j, Y', strtotime($vaccination['vaccination_date'])); ?></span>
+                                        <span style="color: #2c3e50;">
+                                            <?php echo date('M j, Y', strtotime($vaccination['vaccination_date'])); ?>
+                                        </span>
                                     </div>
                                     <?php endif; ?>
                                     <?php if (!empty($vaccination['next_due_date'])): ?>
                                     <div>
                                         <strong
-                                            style="color: <?php echo strtotime($vaccination['next_due_date']) < time() && empty($vaccination['vaccination_date']) ? '#dc3545' : '#17a2b8'; ?>;">Next
-                                            Due:</strong><br>
-                                        <span
-                                            style="color: #2c3e50;"><?php echo date('M j, Y', strtotime($vaccination['next_due_date'])); ?></span>
+                                            style="color: <?php echo strtotime($vaccination['next_due_date']) < time() && empty($vaccination['vaccination_date']) ? '#dc3545' : '#17a2b8'; ?>;">
+                                            Next Due:
+                                        </strong><br>
+                                        <span style="color: #2c3e50;">
+                                            <?php echo date('M j, Y', strtotime($vaccination['next_due_date'])); ?>
+                                        </span>
                                     </div>
                                     <?php endif; ?>
                                 </div>
@@ -1388,13 +1366,13 @@ $common_vaccines = [
                             </td>
                             <td>
                                 <?php
-                                    $status_class = $vaccination['vaccination_status'] ?? 'unknown';
-                                    $status_icon = [
-                                        'completed' => 'check-circle',
-                                        'pending' => 'hourglass-half',
-                                        'overdue' => 'exclamation-triangle'
-                                    ][$status_class] ?? 'question-circle';
-                                ?>
+                                        $status_class = $vaccination['vaccination_status'] ?? 'unknown';
+                                        $status_icon = [
+                                            'completed' => 'check-circle',
+                                            'pending' => 'hourglass-half',
+                                            'overdue' => 'exclamation-triangle'
+                                        ][$status_class] ?? 'question-circle';
+                                        ?>
                                 <span class="status-badge status-<?php echo $status_class; ?>">
                                     <i class="fas fa-<?php echo $status_icon; ?>"></i>
                                     <?php echo ucfirst($status_class); ?>
@@ -1402,16 +1380,16 @@ $common_vaccines = [
                                 <?php if ($status_class === 'overdue' && !empty($vaccination['next_due_date'])): ?>
                                 <div style="font-size: 0.7rem; color: #dc3545; margin-top: 4px;">
                                     <?php 
-                                        $days_overdue = floor((time() - strtotime($vaccination['next_due_date'])) / (60*60*24));
-                                        echo $days_overdue . ' days overdue';
-                                    ?>
+                                                $days_overdue = floor((time() - strtotime($vaccination['next_due_date'])) / (60*60*24));
+                                                echo $days_overdue . ' days overdue';
+                                                ?>
                                 </div>
                                 <?php elseif ($status_class === 'pending' && !empty($vaccination['next_due_date'])): ?>
                                 <div style="font-size: 0.7rem; color: #ffc107; margin-top: 4px;">
                                     <?php 
-                                        $days_until = floor((strtotime($vaccination['next_due_date']) - time()) / (60*60*24));
-                                        echo max(0, $days_until) . ' days remaining';
-                                    ?>
+                                                $days_until = floor((strtotime($vaccination['next_due_date']) - time()) / (60*60*24));
+                                                echo max(0, $days_until) . ' days remaining';
+                                                ?>
                                 </div>
                                 <?php endif; ?>
                             </td>
@@ -1433,7 +1411,7 @@ $common_vaccines = [
                                         <i class="fas fa-edit"></i> Edit
                                     </button>
                                     <button class="btn btn-danger btn-sm"
-                                        onclick="confirmDeleteVaccination(<?php echo $vaccination['vaccination_id']; ?>, '<?php echo htmlspecialchars(($vaccination['vaccine_name'] ?? 'Unknown') . ' - ' . ($vaccination['pet_name'] ?? 'Unknown Pet'), ENT_QUOTES); ?>')">
+                                        onclick="deleteVaccination(<?php echo $vaccination['vaccination_id']; ?>, '<?php echo htmlspecialchars(addslashes($vaccination['vaccine_name'] . ' - ' . $vaccination['pet_name'])); ?>')">
                                         <i class="fas fa-trash"></i> Delete
                                     </button>
                                 </div>
@@ -1464,10 +1442,10 @@ $common_vaccines = [
                     <?php endif; ?>
 
                     <?php
-                        $start = max(1, $page - 2);
-                        $end = min($total_pages, $page + 2);
-                        
-                        if ($start > 1): ?>
+                            $start = max(1, $page - 2);
+                            $end = min($total_pages, $page + 2);
+                            
+                            if ($start > 1): ?>
                     <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => 1])); ?>">1</a>
                     <?php if ($start > 2): ?>
                     <span>...</span>
@@ -1533,7 +1511,7 @@ $common_vaccines = [
                                     endif;
                                 ?>
                                 <option value="<?php echo $pet['pet_id']; ?>">
-                                    <?php echo htmlspecialchars(($pet['pet_name'] ?? 'Unknown') . ' - ' . ($pet['category_name'] ?? 'Unknown') . ' (' . ($pet['breed_name'] ?? 'Mixed') . ')'); ?>
+                                    <?php echo htmlspecialchars($pet['pet_name'] . ' - ' . $pet['category_name'] . ' (' . ($pet['breed_name'] ?? 'Mixed') . ')'); ?>
                                 </option>
                                 <?php endforeach; ?>
                                 <?php if ($current_shelter !== '') echo '</optgroup>'; ?>
@@ -1604,9 +1582,9 @@ $common_vaccines = [
 
     <!-- Delete Confirmation Modal -->
     <div id="deleteModal" class="modal">
-        <div class="modal-content">
+        <div class="modal-content" style="max-width: 500px;">
             <div class="modal-header">
-                <h3 class="modal-title">Confirm Vaccination Deletion</h3>
+                <h3 class="modal-title">Confirm Deletion</h3>
                 <button class="modal-close" onclick="closeModal('deleteModal')">&times;</button>
             </div>
             <div class="modal-body">
@@ -1628,7 +1606,7 @@ $common_vaccines = [
             </div>
             <div class="modal-actions">
                 <button class="btn btn-secondary" onclick="closeModal('deleteModal')">Cancel</button>
-                <button class="btn btn-danger" onclick="confirmDeleteVaccination()">
+                <button class="btn btn-danger" id="confirmDeleteBtn">
                     <i class="fas fa-trash"></i> Delete Record
                 </button>
             </div>
@@ -1638,7 +1616,7 @@ $common_vaccines = [
     <script>
     // Global variables
     let currentVaccinationId = null;
-    let isEditMode = false;
+    let deleteVaccinationId = null;
 
     // Initialize page
     document.addEventListener('DOMContentLoaded', function() {
@@ -1653,24 +1631,17 @@ $common_vaccines = [
     // Filter functions
     function filterByStatus(status) {
         const url = new URL(window.location);
-        if (status) {
-            url.searchParams.set('status', status);
-        } else {
-            url.searchParams.delete('status');
-        }
+        url.searchParams.set('status', status);
         url.searchParams.delete('page');
         window.location.href = url.toString();
     }
 
-    function handleSearchKeypress(event) {
-        if (event.key === 'Enter') {
-            document.getElementById('filtersForm').submit();
-        }
+    function clearFilters() {
+        window.location.href = 'manageVaccinations.php';
     }
 
-    // Show add vaccination modal
+    // Modal functions
     function showAddVaccinationModal() {
-        isEditMode = false;
         document.getElementById('modalTitle').textContent = 'Add Vaccination Record';
         document.getElementById('actionType').value = 'add_vaccination';
         document.getElementById('vaccinationForm').reset();
@@ -1678,15 +1649,13 @@ $common_vaccines = [
         document.getElementById('vaccinationModal').style.display = 'block';
     }
 
-    // Edit vaccination
     function editVaccination(vaccinationId) {
-        isEditMode = true;
         currentVaccinationId = vaccinationId;
         document.getElementById('modalTitle').textContent = 'Edit Vaccination Record';
         document.getElementById('actionType').value = 'update_vaccination';
         document.getElementById('vaccinationId').value = vaccinationId;
 
-        // Fetch vaccination details via AJAX
+        // Fetch vaccination details
         const formData = new FormData();
         formData.append('action', 'get_vaccination_details');
         formData.append('vaccination_id', vaccinationId);
@@ -1709,9 +1678,12 @@ $common_vaccines = [
                     document.getElementById('veterinarianName').value = vaccination.veterinarian_name || '';
                     document.getElementById('notes').value = vaccination.notes || '';
 
+                    // Disable pet selection in edit mode
+                    document.getElementById('petSelect').disabled = true;
+
                     document.getElementById('vaccinationModal').style.display = 'block';
                 } else {
-                    showMessage('Failed to load vaccination details', 'error');
+                    showMessage('Failed to load vaccination details: ' + data.message, 'error');
                 }
             })
             .catch(error => {
@@ -1720,16 +1692,11 @@ $common_vaccines = [
             });
     }
 
-    // View vaccination details
     function viewVaccinationDetails(vaccinationId) {
-        currentVaccinationId = vaccinationId;
-
-        // Show loading
         document.getElementById('viewModalContent').innerHTML =
             '<div style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
         document.getElementById('viewModal').style.display = 'block';
 
-        // Fetch vaccination details
         const formData = new FormData();
         formData.append('action', 'get_vaccination_details');
         formData.append('vaccination_id', vaccinationId);
@@ -1746,27 +1713,41 @@ $common_vaccines = [
                 if (data.success) {
                     const vaccination = data.vaccination;
                     const detailsHtml = `
-                        <div style="display: grid; gap: 15px;">
+                        <div style="display: grid; gap: 20px;">
                             <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                                <h4 style="margin-bottom: 10px; color: #2c3e50;">Pet Information</h4>
-                                <p style="margin: 0;"><strong>Name:</strong> ${vaccination.pet_name || 'Unknown'}</p>
-                                <p style="margin: 0;"><strong>Category:</strong> ${vaccination.category_name || 'Unknown'}</p>
-                                <p style="margin: 0;"><strong>Breed:</strong> ${vaccination.breed_name || 'Unknown'}</p>
-                                <p style="margin: 0;"><strong>Shelter:</strong> ${vaccination.shelter_name || 'Unknown'}</p>
+                                <h4 style="margin-bottom: 10px; color: #2c3e50;"><i class="fas fa-paw"></i> Pet Information</h4>
+                                <div style="display: grid; gap: 8px;">
+                                    <p><strong>Name:</strong> ${vaccination.pet_name || 'Unknown'}</p>
+                                    <p><strong>Category:</strong> ${vaccination.category_name || 'Unknown'}</p>
+                                    <p><strong>Breed:</strong> ${vaccination.breed_name || 'Mixed'}</p>
+                                    <p><strong>Shelter:</strong> ${vaccination.shelter_name || 'Unknown'}</p>
+                                </div>
                             </div>
+                            
                             <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                                <h4 style="margin-bottom: 10px; color: #2c3e50;">Vaccination Information</h4>
-                                <p style="margin: 0;"><strong>Vaccine:</strong> ${vaccination.vaccine_name || 'N/A'}</p>
-                                <p style="margin: 0;"><strong>Administered Date:</strong> ${vaccination.vaccination_date ? new Date(vaccination.vaccination_date).toLocaleDateString() : 'Not administered'}</p>
-                                <p style="margin: 0;"><strong>Next Due Date:</strong> ${vaccination.next_due_date ? new Date(vaccination.next_due_date).toLocaleDateString() : 'Not set'}</p>
-                                <p style="margin: 0;"><strong>Veterinarian:</strong> ${vaccination.veterinarian_name || 'Not specified'}</p>
+                                <h4 style="margin-bottom: 10px; color: #2c3e50;"><i class="fas fa-syringe"></i> Vaccination Information</h4>
+                                <div style="display: grid; gap: 8px;">
+                                    <p><strong>Vaccine:</strong> ${vaccination.vaccine_name || 'N/A'}</p>
+                                    <p><strong>Administered Date:</strong> ${vaccination.vaccination_date ? new Date(vaccination.vaccination_date).toLocaleDateString() : 'Not administered'}</p>
+                                    <p><strong>Next Due Date:</strong> ${vaccination.next_due_date ? new Date(vaccination.next_due_date).toLocaleDateString() : 'Not set'}</p>
+                                    <p><strong>Veterinarian:</strong> ${vaccination.veterinarian_name || 'Not specified'}</p>
+                                </div>
                             </div>
+                            
                             ${vaccination.notes ? `
                             <div style="padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                                <h4 style="margin-bottom: 10px; color: #2c3e50;">Notes</h4>
-                                <p style="margin: 0; white-space: pre-wrap;">${vaccination.notes}</p>
+                                <h4 style="margin-bottom: 10px; color: #2c3e50;"><i class="fas fa-notes-medical"></i> Notes</h4>
+                                <p style="white-space: pre-wrap;">${vaccination.notes}</p>
                             </div>
                             ` : ''}
+                            
+                            <div style="padding: 15px; background: #e7f3ff; border-radius: 8px;">
+                                <h4 style="margin-bottom: 10px; color: #2c3e50;"><i class="fas fa-info-circle"></i> Record Information</h4>
+                                <div style="display: grid; gap: 8px;">
+                                    <p><strong>Record ID:</strong> #${vaccination.vaccination_id}</p>
+                                    <p><strong>Created:</strong> ${vaccination.created_at ? new Date(vaccination.created_at).toLocaleString() : 'N/A'}</p>
+                                </div>
+                            </div>
                         </div>
                     `;
                     document.getElementById('viewModalContent').innerHTML = detailsHtml;
@@ -1782,10 +1763,56 @@ $common_vaccines = [
             });
     }
 
-    // Save vaccination
+    function deleteVaccination(vaccinationId, vaccinationName) {
+        deleteVaccinationId = vaccinationId;
+        document.getElementById('deleteVaccinationName').textContent = `Vaccination: ${vaccinationName}`;
+        document.getElementById('deleteModal').style.display = 'block';
+
+        // Set up the confirm delete button
+        document.getElementById('confirmDeleteBtn').onclick = function() {
+            confirmDelete();
+        };
+    }
+
+    function confirmDelete() {
+        if (deleteVaccinationId) {
+            const formData = new FormData();
+            formData.append('action', 'delete_vaccination');
+            formData.append('vaccination_id', deleteVaccinationId);
+
+            fetch(window.location.href, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showMessage(data.message, 'success');
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 1500);
+                    } else {
+                        showMessage(data.message || 'Failed to delete vaccination', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showMessage('Error deleting vaccination', 'error');
+                });
+
+            closeModal('deleteModal');
+        }
+    }
+
     function saveVaccination() {
         const form = document.getElementById('vaccinationForm');
         const formData = new FormData(form);
+
+        // Re-enable pet select if it was disabled
+        document.getElementById('petSelect').disabled = false;
 
         // Validate required fields
         const petId = formData.get('pet_id');
@@ -1796,41 +1823,6 @@ $common_vaccines = [
             return;
         }
 
-        performAjaxAction(formData);
-        closeModal('vaccinationModal');
-    }
-
-    // Confirm delete vaccination
-    function confirmDeleteVaccination(vaccinationId, vaccinationName) {
-        currentVaccinationId = vaccinationId;
-        document.getElementById('deleteVaccinationName').textContent = `Vaccination: ${vaccinationName}`;
-        document.getElementById('deleteModal').style.display = 'block';
-    }
-
-    function confirmDeleteVaccination() {
-        if (currentVaccinationId) {
-            const formData = new FormData();
-            formData.append('action', 'delete_vaccination');
-            formData.append('vaccination_id', currentVaccinationId);
-
-            performAjaxAction(formData);
-            closeModal('deleteModal');
-        }
-    }
-
-    // Close modal
-    function closeModal(modalId) {
-        document.getElementById(modalId).style.display = 'none';
-        currentVaccinationId = null;
-        isEditMode = false;
-    }
-
-    // Perform AJAX action
-    function performAjaxAction(formData) {
-        // Show loading state
-        document.body.style.opacity = '0.7';
-        document.body.style.pointerEvents = 'none';
-
         fetch(window.location.href, {
                 method: 'POST',
                 headers: {
@@ -1840,28 +1832,32 @@ $common_vaccines = [
             })
             .then(response => response.json())
             .then(data => {
-                document.body.style.opacity = '1';
-                document.body.style.pointerEvents = 'auto';
-
                 if (data.success) {
                     showMessage(data.message, 'success');
-                    // Refresh page after successful action
+                    closeModal('vaccinationModal');
                     setTimeout(() => {
                         window.location.reload();
                     }, 1500);
                 } else {
-                    showMessage(data.message || 'An error occurred', 'error');
+                    showMessage(data.message || 'Failed to save vaccination', 'error');
                 }
             })
             .catch(error => {
-                document.body.style.opacity = '1';
-                document.body.style.pointerEvents = 'auto';
                 console.error('Error:', error);
-                showMessage('Network error occurred', 'error');
+                showMessage('Error saving vaccination', 'error');
             });
     }
 
-    // Show message notification
+    function closeModal(modalId) {
+        document.getElementById(modalId).style.display = 'none';
+        if (modalId === 'vaccinationModal') {
+            document.getElementById('petSelect').disabled = false;
+            document.getElementById('vaccinationForm').reset();
+        }
+        currentVaccinationId = null;
+        deleteVaccinationId = null;
+    }
+
     function showMessage(message, type) {
         // Remove existing messages
         const existingMessages = document.querySelectorAll('.message');
@@ -1871,10 +1867,8 @@ $common_vaccines = [
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${type}`;
         messageDiv.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
-                    <span>${message}</span>
-                </div>
+                <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+                <span>${message}</span>
             `;
 
         document.body.appendChild(messageDiv);
@@ -1885,14 +1879,12 @@ $common_vaccines = [
         }, 5000);
     }
 
-    // Refresh data
     function refreshData() {
         window.location.reload();
     }
 
-    // Export vaccinations data
     function exportVaccinations() {
-        showMessage('Export functionality will be implemented', 'info');
+        showMessage('Export functionality coming soon!', 'info');
     }
 
     // Keyboard shortcuts
@@ -1900,24 +1892,51 @@ $common_vaccines = [
         // Escape key to close modals
         if (event.key === 'Escape') {
             const modals = document.querySelectorAll('.modal');
-            modals.forEach(modal => modal.style.display = 'none');
-            currentVaccinationId = null;
-            isEditMode = false;
+            modals.forEach(modal => {
+                if (modal.style.display === 'block') {
+                    modal.style.display = 'none';
+                }
+            });
         }
+    });
 
-        // Ctrl+R to refresh
-        if (event.ctrlKey && event.key === 'r') {
-            event.preventDefault();
-            refreshData();
+    // Auto-calculate next due date based on vaccine type
+    document.getElementById('vaccineName').addEventListener('change', function() {
+        const vaccine = this.value.toLowerCase();
+        const vaccinationDate = document.getElementById('vaccinationDate').value;
+
+        if (vaccinationDate) {
+            let months = 12; // Default to 1 year
+
+            // Set different intervals based on vaccine type
+            if (vaccine.includes('rabies')) {
+                months = 12;
+            } else if (vaccine.includes('dhpp') || vaccine.includes('fvrcp')) {
+                months = 12;
+            } else if (vaccine.includes('bordetella')) {
+                months = 6;
+            }
+
+            // Calculate next due date
+            const date = new Date(vaccinationDate);
+            date.setMonth(date.getMonth() + months);
+            document.getElementById('nextDueDate').value = date.toISOString().split('T')[0];
         }
+    });
 
-        // Ctrl+N to add new vaccination
-        if (event.ctrlKey && event.key === 'n') {
-            event.preventDefault();
-            showAddVaccinationModal();
+    // Update next due date when vaccination date changes
+    document.getElementById('vaccinationDate').addEventListener('change', function() {
+        const vaccine = document.getElementById('vaccineName').value;
+        if (vaccine) {
+            document.getElementById('vaccineName').dispatchEvent(new Event('change'));
         }
     });
     </script>
 </body>
 
 </html>
+
+<?php
+// Close database connection
+$conn->close();
+?>

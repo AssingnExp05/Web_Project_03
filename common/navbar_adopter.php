@@ -650,6 +650,13 @@ $auth_path = ($current_dir === 'adopter') ? '../auth/' : 'auth/';
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a href="<?php echo $base_path; ?>vaccinationTracker.php"
+                        class="nav-link <?php echo isActive('vaccinationTracker', $current_page); ?>">
+                        <i class="nav-icon fas fa-syringe"></i>
+                        <span>Vaccinations</span>
+                    </a>
+                </li>
+                <li class="nav-item">
                     <a href="<?php echo $base_path; ?>careGuides.php"
                         class="nav-link <?php echo isActive('careGuides', $current_page); ?>">
                         <i class="nav-icon fas fa-book-open"></i>
@@ -682,6 +689,10 @@ $auth_path = ($current_dir === 'adopter') ? '../auth/' : 'auth/';
                         <a href="<?php echo $base_path; ?>myAdoptions.php" class="dropdown-item">
                             <i class="fas fa-heart"></i>
                             <span>My Adoptions</span>
+                        </a>
+                        <a href="<?php echo $base_path; ?>vaccinationTracker.php" class="dropdown-item">
+                            <i class="fas fa-syringe"></i>
+                            <span>Vaccination Tracker</span>
                         </a>
                         <a href="#" class="dropdown-item" onclick="viewSettings()">
                             <i class="fas fa-cog"></i>
